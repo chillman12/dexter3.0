@@ -31,8 +31,8 @@ impl MarketDataCollector {
     pub async fn get_price(&self, pair: &str) -> Result<Decimal> {
         // TODO: Get real price data
         match pair {
-            "SOL/USDC" => Ok(Decimal::from(103)),
-            "ETH/USDC" => Ok(Decimal::from(2245)),
+            "SOL/USDC" => Ok(Decimal::from(171)),
+            "ETH/USDC" => Ok(Decimal::from(3400)),
             _ => Ok(Decimal::from(100)),
         }
     }

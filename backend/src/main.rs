@@ -8,11 +8,12 @@ use anyhow::Result;
 use rust_decimal::{Decimal, prelude::FromStr};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, RwLock, Mutex};
-use log::{info, error, debug};
+use log::{info, error, debug, warn};
 use chrono;
 use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use async_trait::async_trait;
 use futures_util;
+use rand;
 
 // Import all modules
 mod market_data;
@@ -23,15 +24,17 @@ mod dashboard_api;
 mod mev_protection;
 mod flash_loan_simulator;
 mod ws_server;
+mod external_apis;
+mod trade_execution;
 
-use market_data::*;
-use arbitrage_engine::*;
-use smart_contracts::*;
-use liquidty_pool::*;
-use dashboard_api::*;
-use mev_protection::*;
-use flash_loan_simulator::*;
-use ws_server::*;
+// Import specific items we need
+use dashboard_api::DashboardApiServer;
+use mev_protection::MevProtectionEngine;
+use flash_loan_simulator::{FlashLoanSimulator, FlashLoanSimulationRequest, FlashLoanSimulationResult};
+use ws_server::WebSocketServer;
+use mev_protection::MevDetection;
+use external_apis::{ExternalApiClient, ArbitrageOpportunity as ExternalArbitrageOpportunity};
+use trade_execution::{TradeExecutionEngine, TradeExecution, Portfolio, ExecutionMetrics};
 
 // Core Data Structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,11 +138,15 @@ pub struct DexterPlatform {
     dex_clients: HashMap<String, Box<dyn DexClient + Send + Sync>>,
     cex_clients: HashMap<String, Box<dyn CexClient + Send + Sync>>,
     
+    // External API integration
+    external_api_client: Arc<ExternalApiClient>,
+    
     // Advanced Features
-    dashboard_api: Option<Arc<DashboardApiServer>>,
+    dashboard_api: Arc<RwLock<Option<Arc<DashboardApiServer>>>>,
     mev_protection: Arc<MevProtectionEngine>,
     flash_loan_simulator: Arc<FlashLoanSimulator>,
-    ws_server: Option<Arc<WebSocketServer>>,
+    trade_execution_engine: Arc<TradeExecutionEngine>,
+    ws_server: Arc<RwLock<Option<Arc<WebSocketServer>>>>,
     
     // Real-time communication channels
     price_broadcaster: broadcast::Sender<PriceInfo>,
@@ -186,11 +193,15 @@ impl DexterPlatform {
             dex_clients: HashMap::new(),
             cex_clients: HashMap::new(),
             
+            // External API integration
+            external_api_client: Arc::new(ExternalApiClient::new()),
+            
             // Advanced Features
-            dashboard_api: None,
+            dashboard_api: Arc::new(RwLock::new(None)),
             mev_protection: Arc::new(MevProtectionEngine::new()),
             flash_loan_simulator: Arc::new(FlashLoanSimulator::new()),
-            ws_server: None,
+            trade_execution_engine: Arc::new(TradeExecutionEngine::new()),
+            ws_server: Arc::new(RwLock::new(None)),
             price_broadcaster: price_tx,
             opportunity_broadcaster: opp_tx,
             config,
@@ -200,7 +211,7 @@ impl DexterPlatform {
         Ok(platform)
     }
     
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn start(self: Arc<Self>) -> Result<()> {
         info!("🚀 DEXTER v3.0 - Advanced Multi-Platform Trading System Starting!");
         info!("📡 Initializing real-time WebSocket streaming architecture...");
         
@@ -221,9 +232,17 @@ impl DexterPlatform {
             }
         });
         
+        info!("🎯 Starting Trade Execution Engine...");
+        let trade_engine = self.trade_execution_engine.clone();
+        tokio::spawn(async move {
+            if let Err(e) = trade_engine.start().await {
+                error!("Trade Execution Engine error: {}", e);
+            }
+        });
+        
         info!("🌐 Starting Dashboard API Server (REST)...");
-        let dashboard_api = Arc::new(DashboardApiServer::new(3001));
-        self.dashboard_api = Some(dashboard_api.clone());
+        let dashboard_api = Arc::new(DashboardApiServer::new(3001, self.external_api_client.clone()));
+        self.dashboard_api.write().await.replace(dashboard_api.clone());
         tokio::spawn(async move {
             if let Err(e) = dashboard_api.start().await {
                 error!("Dashboard API Server error: {}", e);
@@ -241,7 +260,7 @@ impl DexterPlatform {
             opportunity_receiver,
         ));
         
-        self.ws_server = Some(ws_server.clone());
+        self.ws_server.write().await.replace(ws_server.clone());
         tokio::spawn(async move {
             if let Err(e) = ws_server.start().await {
                 error!("WebSocket Server error: {}", e);
@@ -251,18 +270,18 @@ impl DexterPlatform {
         // Start all concurrent services with enhanced real-time data flow
         let handles = vec![
             // Core price scanning with WebSocket broadcasting
-            tokio::spawn(self.enhanced_price_scanning_loop()),
+            tokio::spawn(self.clone().enhanced_price_scanning_loop()),
             
             // Arbitrage detection with real-time streaming
-            tokio::spawn(self.enhanced_arbitrage_detection_loop()),
+            tokio::spawn(self.clone().enhanced_arbitrage_detection_loop()),
             
             // Strategy-specific data flows
-            tokio::spawn(self.mev_strategy_data_flow()),
-            tokio::spawn(self.flash_loan_strategy_data_flow()),
-            tokio::spawn(self.arbitrage_strategy_data_flow()),
+            tokio::spawn(self.clone().mev_strategy_data_flow()),
+            tokio::spawn(self.clone().flash_loan_strategy_data_flow()),
+            tokio::spawn(self.clone().arbitrage_strategy_data_flow()),
             
             // Performance metrics with WebSocket stats
-            tokio::spawn(self.enhanced_metrics_loop()),
+            tokio::spawn(self.clone().enhanced_metrics_loop()),
         ];
         
         info!("✅ All systems started successfully!");
@@ -278,11 +297,11 @@ impl DexterPlatform {
     }
     
     // 🔥 ENHANCED PRICE SCANNING WITH REAL-TIME WEBSOCKET BROADCASTING 🔥
-    async fn enhanced_price_scanning_loop(&self) -> Result<()> {
+    async fn enhanced_price_scanning_loop(self: Arc<Self>) -> Result<()> {
         info!("📊 Starting enhanced price scanning with WebSocket broadcasting...");
         
         let mut interval = tokio::time::interval(
-            Duration::from_millis(self.config.scan_interval_ms)
+            Duration::from_millis(self.config.scan_interval_ms * 10) // Slower for API calls
         );
         
         let pairs = vec!["SOL/USDC", "ETH/USDC", "BTC/USDC", "RAY/USDC", "ORCA/USDC"];
@@ -291,24 +310,55 @@ impl DexterPlatform {
         loop {
             interval.tick().await;
             
-            // Generate realistic price data for each pair and exchange
+            // 🔥 GET REAL-TIME PRICES FROM EXTERNAL APIs 🔥
+            let real_time_prices = match self.external_api_client.get_real_time_prices().await {
+                Ok(prices) => {
+                    info!("✅ Successfully fetched real-time prices from external APIs");
+                    prices
+                }
+                Err(e) => {
+                    error!("❌ Failed to fetch real-time prices: {}", e);
+                    // Fallback to current market prices if APIs fail
+                    let mut fallback_prices = HashMap::new();
+                    fallback_prices.insert("SOL/USDC".to_string(), 171.12); // Updated to current market price
+                    fallback_prices.insert("ETH/USDC".to_string(), 3400.00); // Updated to current market price
+                    fallback_prices.insert("BTC/USDC".to_string(), 95000.00); // Updated to current market price
+                    fallback_prices.insert("RAY/USDC".to_string(), 2.45);
+                    fallback_prices.insert("ORCA/USDC".to_string(), 1.85);
+                    fallback_prices
+                }
+            };
+            
+            // Generate price data for each pair and exchange using real-time data
             for pair in &pairs {
                 for exchange in &exchanges {
-                    let base_price = match pair.as_str() {
-                        "SOL/USDC" => 103.45,
-                        "ETH/USDC" => 2245.30,
-                        "BTC/USDC" => 42150.00,
-                        "RAY/USDC" => 2.45,
-                        "ORCA/USDC" => 1.85,
-                        _ => 100.0,
+                    // Use real-time price data, with fallback to average SOL price
+                    let base_price = if pair == &"SOL/USDC" {
+                        // Prefer average price, fallback to individual sources, then fallback value
+                        real_time_prices.get("SOL/USDC_AVERAGE")
+                            .or_else(|| real_time_prices.get("SOL/USDC"))
+                            .or_else(|| real_time_prices.get("SOL/USDC_RAYDIUM"))
+                            .or_else(|| real_time_prices.get("SOL/USDC_DEXSCREENER"))
+                            .copied()
+                            .unwrap_or(171.12) // Final fallback to current market price
+                    } else {
+                        real_time_prices.get(*pair).copied().unwrap_or_else(|| {
+                            match *pair {
+                                "ETH/USDC" => 3400.00,
+                                "BTC/USDC" => 95000.00,
+                                "RAY/USDC" => 2.45,
+                                "ORCA/USDC" => 1.85,
+                                _ => 100.0,
+                            }
+                        })
                     };
                     
-                    // Add realistic market fluctuation
-                    let fluctuation = (rand::random::<f64>() - 0.5) * 0.01; // ±0.5%
+                    // Add realistic market fluctuation (smaller for real data)
+                    let fluctuation = (rand::random::<f64>() - 0.5) * 0.005; // ±0.25% for real data
                     let current_price = base_price * (1.0 + fluctuation);
                     
                     // Add exchange-specific spreads
-                    let spread = match exchange.as_str() {
+                    let spread = match *exchange {
                         "Jupiter" | "Raydium" | "Orca" => 0.003, // 0.3% DEX spread
                         "Binance" | "Coinbase" => 0.001,        // 0.1% CEX spread
                         _ => 0.002,
@@ -318,13 +368,13 @@ impl DexterPlatform {
                     let ask_price = current_price * (1.0 + spread);
                     
                     let price_info = PriceInfo {
-                        exchange: exchange.clone(),
+                        exchange: exchange.to_string(),
                         exchange_type: if exchange.contains("Binance") || exchange.contains("Coinbase") { 
                             ExchangeType::CEX 
                         } else { 
                             ExchangeType::DEX 
                         },
-                        pair: pair.clone(),
+                        pair: pair.to_string(),
                         price: Decimal::from_f64(current_price).unwrap_or_default(),
                         bid: Some(Decimal::from_f64(bid_price).unwrap_or_default()),
                         ask: Some(Decimal::from_f64(ask_price).unwrap_or_default()),
@@ -345,128 +395,383 @@ impl DexterPlatform {
                 }
             }
             
-            debug!("📡 Enhanced price scan completed - data streamed to WebSocket clients");
+            debug!("📡 Enhanced price scan completed with real-time API data - streamed to WebSocket clients");
         }
     }
     
     // 🔥 ENHANCED ARBITRAGE DETECTION WITH REAL-TIME STREAMING 🔥
-    async fn enhanced_arbitrage_detection_loop(&self) -> Result<()> {
+    async fn enhanced_arbitrage_detection_loop(self: Arc<Self>) -> Result<()> {
         info!("🎯 Starting enhanced arbitrage detection with real-time streaming...");
         
-        let mut interval = tokio::time::interval(Duration::from_millis(250)); // 4x per second
+        let mut interval = tokio::time::interval(Duration::from_millis(500)); // Optimized: 2x per second
+        let mut external_api_counter = 0;
         
         loop {
             interval.tick().await;
             
-            // Scan for real arbitrage opportunities
-            let opportunities = self.scan_cross_exchange_arbitrage().await?;
+            let mut all_opportunities = Vec::new();
             
-            if !opportunities.is_empty() {
-                info!("🚨 Found {} arbitrage opportunities - streaming to clients", opportunities.len());
+            // Scan for mock arbitrage opportunities (fast)
+            let mock_opportunities = self.scan_cross_exchange_arbitrage().await?;
+            all_opportunities.extend(mock_opportunities);
+            
+            // Scan external APIs every 20th iteration (every 10 seconds) to respect rate limits
+            external_api_counter += 1;
+            if external_api_counter >= 20 {
+                external_api_counter = 0;
+                
+                info!("🌐 Scanning external APIs for real arbitrage opportunities...");
+                match self.scan_external_api_opportunities().await {
+                    Ok(external_opportunities) => {
+                        all_opportunities.extend(external_opportunities);
+                        info!("✅ External API scan completed successfully");
+                    }
+                    Err(e) => {
+                        error!("❌ External API scan failed: {}", e);
+                    }
+                }
+            }
+            
+            if !all_opportunities.is_empty() {
+                info!("🚨 Found {} arbitrage opportunities - streaming to clients", all_opportunities.len());
                 
                 // Update opportunities storage
                 {
                     let mut opps = self.opportunities.write().await;
-                    opps.extend(opportunities.clone());
+                    opps.extend(all_opportunities.clone());
                     
                     // Keep only recent opportunities (last 50)
                     if opps.len() > 50 {
-                        opps.drain(0..opps.len() - 50);
+                        let drain_count = opps.len() - 50;
+                        opps.drain(0..drain_count);
                     }
                 }
                 
                 // 🔥 BROADCAST EACH OPPORTUNITY TO WEBSOCKET CLIENTS 🔥
-                for opp in opportunities {
-                    let _ = self.opportunity_broadcaster.send(opp);
+                for opp in &all_opportunities {
+                    let _ = self.opportunity_broadcaster.send(opp.clone());
                 }
                 
                 // Update metrics
                 let mut metrics = self.metrics.lock().await;
-                metrics.opportunities_found += opportunities.len() as u64;
+                metrics.opportunities_found += all_opportunities.len() as u64;
             }
         }
     }
     
     async fn scan_cross_exchange_arbitrage(&self) -> Result<Vec<ArbitrageOpportunity>> {
         let mut opportunities = Vec::new();
-        let feeds = self.price_feeds.read().await;
         
-        // Group prices by pair
-        let mut pair_prices: HashMap<String, Vec<&PriceInfo>> = HashMap::new();
-        for price_info in feeds.values().flatten() {
-            pair_prices.entry(price_info.pair.clone())
-                      .or_insert_with(Vec::new)
-                      .push(price_info);
-        }
+        // 🔥 GET REAL-TIME SOL PRICE FROM EXTERNAL APIs 🔥
+        let sol_price = match self.external_api_client.get_real_time_prices().await {
+            Ok(prices) => {
+                // Prefer average price, fallback to individual sources
+                prices.get("SOL/USDC_AVERAGE")
+                    .or_else(|| prices.get("SOL/USDC"))
+                    .or_else(|| prices.get("SOL/USDC_RAYDIUM"))
+                    .or_else(|| prices.get("SOL/USDC_DEXSCREENER"))
+                    .copied()
+                    .unwrap_or(171.12) // Final fallback to current market price
+            }
+            Err(e) => {
+                warn!("⚠️ Failed to fetch real-time SOL price: {}", e);
+                171.12 // Fallback to current market price
+            }
+        };
         
-        // Find arbitrage opportunities for each pair
-        for (pair, prices) in pair_prices {
-            if prices.len() < 2 { continue; }
-            
-            // Find min and max prices
-            let min_price_info = prices.iter().min_by_key(|p| p.price).unwrap();
-            let max_price_info = prices.iter().max_by_key(|p| p.price).unwrap();
-            
-            if min_price_info.exchange == max_price_info.exchange { continue; }
-            
-            let profit_percentage = ((max_price_info.price - min_price_info.price) / min_price_info.price).to_f64().unwrap_or(0.0) * 100.0;
-            
-            // Only consider opportunities with >0.5% profit
-            if profit_percentage > 0.5 {
-                let estimated_profit = Decimal::from(10000) * (max_price_info.price - min_price_info.price) / min_price_info.price;
-                
-                let opportunity = ArbitrageOpportunity {
-                    id: format!("arb_{}_{}", pair.replace("/", "_"), chrono::Utc::now().timestamp_millis()),
-                    token_pair: pair.clone(),
-                    buy_exchange: min_price_info.exchange.clone(),
-                    sell_exchange: max_price_info.exchange.clone(),
-                    buy_price: min_price_info.price,
-                    sell_price: max_price_info.price,
-                    profit_percentage: Decimal::from_f64(profit_percentage).unwrap_or_default(),
-                    estimated_profit_usd: estimated_profit,
-                    max_trade_size: Decimal::from(10000),
-                    liquidity_score: rand::random::<f64>() * 0.5 + 0.5, // 0.5-1.0
-                    risk_score: if profit_percentage > 2.0 { 0.3 } else { 0.6 }, // Higher profit = lower risk for this simulation
-                    confidence: rand::random::<f64>() * 0.3 + 0.7, // 0.7-1.0
-                    timestamp: chrono::Utc::now().timestamp() as u64,
-                    expires_at: chrono::Utc::now().timestamp() as u64 + 30, // 30 second expiry
-                    trade_route: vec![
-                        TradeStep {
-                            exchange: min_price_info.exchange.clone(),
-                            action: "buy".to_string(),
-                            from_token: "USDC".to_string(),
-                            to_token: pair.split('/').next().unwrap().to_string(),
-                            amount: Decimal::from(10000),
-                            price: min_price_info.price,
-                            fees: min_price_info.price * Decimal::from_str("0.003").unwrap(),
-                        },
-                        TradeStep {
-                            exchange: max_price_info.exchange.clone(),
-                            action: "sell".to_string(),
-                            from_token: pair.split('/').next().unwrap().to_string(),
-                            to_token: "USDC".to_string(),
-                            amount: Decimal::from(10000) / min_price_info.price,
-                            price: max_price_info.price,
-                            fees: max_price_info.price * Decimal::from_str("0.003").unwrap(),
-                        },
-                    ],
-                };
-                
-                opportunities.push(opportunity);
+        info!("💰 Using SOL price: ${:.2} for arbitrage detection", sol_price);
+        
+        // Generate realistic mock arbitrage opportunities using real-time market prices
+        let price_variation = (rand::random::<f64>() - 0.5) * 0.01; // ±0.5% variation
+        
+        let buy_price = sol_price * (1.0 + price_variation - 0.002); // Slightly lower for buy
+        let sell_price = sol_price * (1.0 + price_variation + 0.002); // Slightly higher for sell
+        let profit_percentage = ((sell_price - buy_price) / buy_price) * 100.0;
+        
+        let mock_opportunity = ArbitrageOpportunity {
+            id: format!("arb_{}", chrono::Utc::now().timestamp_millis()),
+            token_pair: "SOL/USDC".to_string(),
+            buy_exchange: "Raydium".to_string(),
+            sell_exchange: "Jupiter".to_string(),
+            buy_price: Decimal::from_f64(buy_price).unwrap_or_default(),
+            sell_price: Decimal::from_f64(sell_price).unwrap_or_default(),
+            profit_percentage: Decimal::from_f64(profit_percentage).unwrap_or_default(),
+            estimated_profit_usd: Decimal::from_f64(profit_percentage * 100.0).unwrap_or_default(), // Profit on $10k
+            max_trade_size: Decimal::from_str("10000").unwrap(),
+            liquidity_score: 0.85,
+            risk_score: 0.25,
+            confidence: 0.92,
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            expires_at: chrono::Utc::now().timestamp() as u64 + 30,
+            trade_route: vec![
+                TradeStep {
+                    exchange: "Raydium".to_string(),
+                    action: "buy".to_string(),
+                    from_token: "USDC".to_string(),
+                    to_token: "SOL".to_string(),
+                    amount: Decimal::from_str("1000").unwrap(),
+                    price: Decimal::from_f64(buy_price).unwrap_or_default(),
+                    fees: Decimal::from_str("0.25").unwrap(),
+                },
+                TradeStep {
+                    exchange: "Jupiter".to_string(),
+                    action: "sell".to_string(),
+                    from_token: "SOL".to_string(),
+                    to_token: "USDC".to_string(),
+                    amount: Decimal::from_f64(1000.0 / buy_price).unwrap_or_default(), // SOL amount
+                    price: Decimal::from_f64(sell_price).unwrap_or_default(),
+                    fees: Decimal::from_str("0.30").unwrap(),
+                },
+            ],
+        };
+        
+        opportunities.push(mock_opportunity);
+        
+        Ok(opportunities)
+    }
+    
+    /// Scan external APIs for real arbitrage opportunities
+    async fn scan_external_api_opportunities(&self) -> Result<Vec<ArbitrageOpportunity>> {
+        let mut opportunities = Vec::new();
+        
+        // Define token pairs for Jupiter API scanning
+        let jupiter_pairs = vec![
+            (external_apis::SolanaTokens::SOL, external_apis::SolanaTokens::USDC),
+            (external_apis::SolanaTokens::USDC, external_apis::SolanaTokens::SOL),
+            (external_apis::SolanaTokens::RAY, external_apis::SolanaTokens::USDC),
+            (external_apis::SolanaTokens::USDC, external_apis::SolanaTokens::RAY),
+        ];
+        
+        // Define GeckoTerminal pools for cross-DEX analysis
+        let gecko_pools = vec![
+            ("solana", external_apis::GeckoTerminalPools::SOLANA_SOL_USDC_RAYDIUM),
+            ("solana", external_apis::GeckoTerminalPools::SOLANA_SOL_USDC_ORCA),
+            ("solana", external_apis::GeckoTerminalPools::SOLANA_RAY_USDC),
+        ];
+        
+        // NEW: Define DEX Screener token addresses
+        let dexscreener_tokens = vec![
+            external_apis::SolanaTokens::SOL,
+            external_apis::SolanaTokens::RAY,
+            external_apis::SolanaTokens::ORCA,
+        ];
+        
+        // NEW: Define Bitquery pairs for analysis
+        let bitquery_pairs = vec![
+            ("SOL", "USDC"),
+            ("RAY", "USDC"),
+            ("ETH", "USDC"),
+        ];
+        
+        // Scan Jupiter for arbitrage opportunities
+        match self.external_api_client.detect_jupiter_arbitrage(
+            &jupiter_pairs,
+            1_000_000_000, // 1 SOL in lamports
+            0.1, // 0.1% minimum profit threshold
+        ).await {
+            Ok(jupiter_opportunities) => {
+                for ext_opp in jupiter_opportunities {
+                    // Convert external opportunity to internal format
+                    let internal_opp = ArbitrageOpportunity {
+                        id: ext_opp.id.clone(),
+                        token_pair: ext_opp.pair.clone(),
+                        buy_exchange: ext_opp.buy_exchange.clone(),
+                        sell_exchange: ext_opp.sell_exchange.clone(),
+                        buy_price: ext_opp.buy_price,
+                        sell_price: ext_opp.sell_price,
+                        profit_percentage: Decimal::from_f64(ext_opp.profit_percentage).unwrap_or_default(),
+                        estimated_profit_usd: ext_opp.estimated_profit,
+                        max_trade_size: ext_opp.required_capital,
+                        liquidity_score: 0.8, // High for Jupiter
+                        risk_score: 0.2, // Low risk for Jupiter
+                        confidence: ext_opp.confidence,
+                        timestamp: ext_opp.timestamp,
+                        expires_at: ext_opp.timestamp + 60, // 1 minute expiry
+                        trade_route: vec![
+                            TradeStep {
+                                exchange: "Jupiter".to_string(),
+                                action: "swap".to_string(),
+                                from_token: "Input".to_string(),
+                                to_token: "Output".to_string(),
+                                amount: ext_opp.required_capital,
+                                price: ext_opp.buy_price,
+                                fees: Decimal::from_str("0.25").unwrap_or_default(),
+                            },
+                        ],
+                    };
+                    
+                    opportunities.push(internal_opp);
+                    
+                    info!("🎯 Jupiter arbitrage opportunity integrated: {} with {:.2}% profit", 
+                          ext_opp.pair, ext_opp.profit_percentage);
+                }
+            }
+            Err(e) => {
+                error!("❌ Failed to scan Jupiter opportunities: {}", e);
             }
         }
         
-        // Sort by profit percentage (highest first)
-        opportunities.sort_by(|a, b| b.profit_percentage.cmp(&a.profit_percentage));
+        // Scan cross-DEX opportunities (Jupiter + GeckoTerminal)
+        match self.external_api_client.detect_cross_dex_arbitrage(
+            &jupiter_pairs,
+            &gecko_pools,
+            1_000_000_000, // 1 SOL in lamports
+            0.2, // 0.2% minimum profit threshold for cross-DEX
+        ).await {
+            Ok(cross_dex_opportunities) => {
+                for ext_opp in cross_dex_opportunities {
+                    let internal_opp = ArbitrageOpportunity {
+                        id: ext_opp.id.clone(),
+                        token_pair: ext_opp.pair.clone(),
+                        buy_exchange: ext_opp.buy_exchange.clone(),
+                        sell_exchange: ext_opp.sell_exchange.clone(),
+                        buy_price: ext_opp.buy_price,
+                        sell_price: ext_opp.sell_price,
+                        profit_percentage: Decimal::from_f64(ext_opp.profit_percentage).unwrap_or_default(),
+                        estimated_profit_usd: ext_opp.estimated_profit,
+                        max_trade_size: ext_opp.required_capital,
+                        liquidity_score: 0.7, // Medium for cross-DEX
+                        risk_score: 0.4, // Higher risk for cross-DEX
+                        confidence: ext_opp.confidence,
+                        timestamp: ext_opp.timestamp,
+                        expires_at: ext_opp.timestamp + 45, // 45 second expiry for cross-DEX
+                        trade_route: vec![
+                            TradeStep {
+                                exchange: ext_opp.buy_exchange.clone(),
+                                action: "buy".to_string(),
+                                from_token: "USDC".to_string(),
+                                to_token: "SOL".to_string(),
+                                amount: ext_opp.required_capital,
+                                price: ext_opp.buy_price,
+                                fees: Decimal::from_str("0.30").unwrap_or_default(),
+                            },
+                            TradeStep {
+                                exchange: ext_opp.sell_exchange.clone(),
+                                action: "sell".to_string(),
+                                from_token: "SOL".to_string(),
+                                to_token: "USDC".to_string(),
+                                amount: ext_opp.required_capital,
+                                price: ext_opp.sell_price,
+                                fees: Decimal::from_str("0.30").unwrap_or_default(),
+                            },
+                        ],
+                    };
+                    
+                    opportunities.push(internal_opp);
+                    
+                    info!("🎯 Cross-DEX arbitrage opportunity integrated: {} vs {} with {:.2}% profit", 
+                          ext_opp.buy_exchange, ext_opp.sell_exchange, ext_opp.profit_percentage);
+                }
+            }
+            Err(e) => {
+                error!("❌ Failed to scan cross-DEX opportunities: {}", e);
+            }
+        }
         
-        // Limit to top 10 opportunities
-        opportunities.truncate(10);
+        // NEW: Scan DEX Screener for arbitrage opportunities
+        match self.external_api_client.detect_dexscreener_arbitrage(
+            &dexscreener_tokens,
+            1.0, // 1.0% minimum price change threshold
+        ).await {
+            Ok(dexscreener_opportunities) => {
+                for ext_opp in dexscreener_opportunities {
+                    let internal_opp = ArbitrageOpportunity {
+                        id: ext_opp.id.clone(),
+                        token_pair: ext_opp.pair.clone(),
+                        buy_exchange: ext_opp.buy_exchange.clone(),
+                        sell_exchange: ext_opp.sell_exchange.clone(),
+                        buy_price: ext_opp.buy_price,
+                        sell_price: ext_opp.sell_price,
+                        profit_percentage: Decimal::from_f64(ext_opp.profit_percentage).unwrap_or_default(),
+                        estimated_profit_usd: ext_opp.estimated_profit,
+                        max_trade_size: ext_opp.required_capital,
+                        liquidity_score: 0.75, // Good for DEX Screener
+                        risk_score: 0.3, // Medium risk
+                        confidence: ext_opp.confidence,
+                        timestamp: ext_opp.timestamp,
+                        expires_at: ext_opp.timestamp + 120, // 2 minute expiry
+                        trade_route: vec![
+                            TradeStep {
+                                exchange: ext_opp.buy_exchange.clone(),
+                                action: "buy".to_string(),
+                                from_token: "USDC".to_string(),
+                                to_token: "Token".to_string(),
+                                amount: ext_opp.required_capital,
+                                price: ext_opp.buy_price,
+                                fees: Decimal::from_str("0.25").unwrap_or_default(),
+                            },
+                        ],
+                    };
+                    
+                    opportunities.push(internal_opp);
+                    
+                    info!("🎯 DEX Screener arbitrage opportunity integrated: {} with {:.2}% profit", 
+                          ext_opp.pair, ext_opp.profit_percentage);
+                }
+            }
+            Err(e) => {
+                error!("❌ Failed to scan DEX Screener opportunities: {}", e);
+            }
+        }
+        
+        // NEW: Scan Bitquery for arbitrage opportunities (less frequent due to rate limits)
+        static mut BITQUERY_COUNTER: u32 = 0;
+        unsafe {
+            BITQUERY_COUNTER += 1;
+            if BITQUERY_COUNTER % 5 == 0 { // Only every 5th external API call
+                match self.external_api_client.detect_bitquery_arbitrage(
+                    &bitquery_pairs,
+                    "solana",
+                    2.0, // 2.0% minimum volatility threshold
+                ).await {
+                    Ok(bitquery_opportunities) => {
+                        for ext_opp in bitquery_opportunities {
+                            let internal_opp = ArbitrageOpportunity {
+                                id: ext_opp.id.clone(),
+                                token_pair: ext_opp.pair.clone(),
+                                buy_exchange: ext_opp.buy_exchange.clone(),
+                                sell_exchange: ext_opp.sell_exchange.clone(),
+                                buy_price: ext_opp.buy_price,
+                                sell_price: ext_opp.sell_price,
+                                profit_percentage: Decimal::from_f64(ext_opp.profit_percentage).unwrap_or_default(),
+                                estimated_profit_usd: ext_opp.estimated_profit,
+                                max_trade_size: ext_opp.required_capital,
+                                liquidity_score: 0.85, // High for Bitquery historical data
+                                risk_score: 0.25, // Lower risk with historical data
+                                confidence: ext_opp.confidence,
+                                timestamp: ext_opp.timestamp,
+                                expires_at: ext_opp.timestamp + 300, // 5 minute expiry for historical data
+                                trade_route: vec![
+                                    TradeStep {
+                                        exchange: ext_opp.buy_exchange.clone(),
+                                        action: "buy".to_string(),
+                                        from_token: "USDC".to_string(),
+                                        to_token: "Token".to_string(),
+                                        amount: ext_opp.required_capital,
+                                        price: ext_opp.buy_price,
+                                        fees: Decimal::from_str("0.30").unwrap_or_default(),
+                                    },
+                                ],
+                            };
+                            
+                            opportunities.push(internal_opp);
+                            
+                            info!("🎯 Bitquery arbitrage opportunity integrated: {} with {:.2}% volatility", 
+                                  ext_opp.pair, ext_opp.profit_percentage);
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to scan Bitquery opportunities: {}", e);
+                    }
+                }
+            }
+        }
         
         Ok(opportunities)
     }
     
     // 🔥 MEV STRATEGY SPECIFIC DATA FLOW 🔥
-    async fn mev_strategy_data_flow(&self) -> Result<()> {
+    async fn mev_strategy_data_flow(self: Arc<Self>) -> Result<()> {
         info!("🛡️ Starting MEV strategy data flow...");
         
         let mut interval = tokio::time::interval(Duration::from_secs(2));
@@ -485,7 +790,7 @@ impl DexterPlatform {
     }
     
     // 🔥 FLASH LOAN STRATEGY SPECIFIC DATA FLOW 🔥
-    async fn flash_loan_strategy_data_flow(&self) -> Result<()> {
+    async fn flash_loan_strategy_data_flow(self: Arc<Self>) -> Result<()> {
         info!("⚡ Starting Flash Loan strategy data flow...");
         
         let mut interval = tokio::time::interval(Duration::from_secs(5));
@@ -502,7 +807,7 @@ impl DexterPlatform {
     }
     
     // 🔥 ARBITRAGE STRATEGY SPECIFIC DATA FLOW 🔥
-    async fn arbitrage_strategy_data_flow(&self) -> Result<()> {
+    async fn arbitrage_strategy_data_flow(self: Arc<Self>) -> Result<()> {
         info!("🎯 Starting Arbitrage strategy data flow...");
         
         let mut interval = tokio::time::interval(Duration::from_millis(500));
@@ -519,7 +824,7 @@ impl DexterPlatform {
     }
     
     // 🔥 ENHANCED METRICS WITH WEBSOCKET STATS 🔥
-    async fn enhanced_metrics_loop(&self) -> Result<()> {
+    async fn enhanced_metrics_loop(self: Arc<Self>) -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         
         loop {
@@ -528,7 +833,8 @@ impl DexterPlatform {
             let mut metrics = self.metrics.lock().await;
             
             // Get WebSocket connection stats
-            if let Some(ws_server) = &self.ws_server {
+            let ws_server_guard = self.ws_server.read().await;
+            if let Some(ws_server) = ws_server_guard.as_ref() {
                 let ws_stats = ws_server.get_connection_stats().await;
                 if let Some(connections) = ws_stats.get("total_connections") {
                     if let Some(count) = connections.as_u64() {
@@ -558,12 +864,46 @@ impl DexterPlatform {
         self.opportunities.read().await.clone()
     }
     
+    // NEW: Trade Execution API methods
+    pub async fn execute_trade(&self, opportunity: &ArbitrageOpportunity) -> Result<TradeExecution> {
+        self.trade_execution_engine.execute_arbitrage(opportunity).await
+    }
+    
+    pub async fn get_active_trades(&self) -> Vec<TradeExecution> {
+        self.trade_execution_engine.get_active_trades().await
+    }
+    
+    pub async fn get_trade_history(&self, limit: usize) -> Vec<TradeExecution> {
+        self.trade_execution_engine.get_trade_history(limit).await
+    }
+    
+    pub async fn get_portfolio(&self) -> Portfolio {
+        self.trade_execution_engine.get_portfolio().await
+    }
+    
+    pub async fn get_execution_metrics(&self) -> ExecutionMetrics {
+        self.trade_execution_engine.get_metrics().await
+    }
+    
+    pub async fn enable_trading(&self) {
+        self.trade_execution_engine.enable_trading().await
+    }
+    
+    pub async fn disable_trading(&self) {
+        self.trade_execution_engine.disable_trading().await
+    }
+    
+    pub async fn set_simulation_mode(&self, enabled: bool) {
+        self.trade_execution_engine.set_simulation_mode(enabled).await
+    }
+    
     pub async fn get_platform_metrics(&self) -> PlatformMetrics {
         self.metrics.lock().await.clone()
     }
     
     pub async fn get_websocket_stats(&self) -> Option<HashMap<String, serde_json::Value>> {
-        if let Some(ws_server) = &self.ws_server {
+        let ws_server_guard = self.ws_server.read().await;
+        if let Some(ws_server) = ws_server_guard.as_ref() {
             Some(ws_server.get_connection_stats().await)
         } else {
             None
@@ -584,10 +924,8 @@ async fn main() -> Result<()> {
         websocket_port: 3002, // WebSocket on port 3002, REST on 3001, Next.js on 3000
     };
     
-    let mut platform = DexterPlatform::new(config).await?;
+    let platform = Arc::new(DexterPlatform::new(config).await?);
     platform.start().await?;
     
     Ok(())
 }
-
-use rand;

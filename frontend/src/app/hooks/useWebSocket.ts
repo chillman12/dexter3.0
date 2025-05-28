@@ -156,18 +156,23 @@ export function useWebSocket(url: string = 'ws://localhost:3002'): UseWebSocketR
         setIsConnected(false)
         setConnectionStatus('disconnected')
 
-        // Attempt to reconnect after 3 seconds
-        if (!event.wasClean) {
+        // Attempt to reconnect after 3 seconds, but limit attempts
+        if (!event.wasClean && connectionStats.reconnectAttempts < 5) {
           setConnectionStats(prev => ({ ...prev, reconnectAttempts: prev.reconnectAttempts + 1 }))
+          const delay = Math.min(3000 * Math.pow(2, connectionStats.reconnectAttempts), 30000) // Exponential backoff, max 30s
           reconnectTimeout.current = setTimeout(() => {
             connect()
-          }, 3000)
+          }, delay)
+        } else if (connectionStats.reconnectAttempts >= 5) {
+          console.warn('🚫 Max reconnection attempts reached, stopping reconnection')
+          setConnectionStatus('error')
         }
       }
 
       ws.current.onerror = (error) => {
         console.error('❌ WebSocket error:', error)
         setConnectionStatus('error')
+        // Don't immediately try to reconnect on error, let onclose handle it
       }
 
     } catch (error) {

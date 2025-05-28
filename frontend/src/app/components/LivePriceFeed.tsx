@@ -8,6 +8,18 @@ interface LivePriceFeedProps {
 }
 
 export default function LivePriceFeed({ priceUpdates, isConnected }: LivePriceFeedProps) {
+  // Helper function to safely convert to number and apply toFixed
+  const safeToFixed = (value: any, decimals: number = 2): string => {
+    const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    return isNaN(num) ? '0.00' : num.toFixed(decimals);
+  };
+
+  // Helper function to safely convert to number for calculations
+  const safeToNumber = (value: any): number => {
+    const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    return isNaN(num) ? 0 : num;
+  };
+
   // Group price updates by pair for better display
   const pricesByPair = priceUpdates.reduce((acc, update) => {
     if (!acc[update.pair]) {
@@ -32,20 +44,22 @@ export default function LivePriceFeed({ priceUpdates, isConnected }: LivePriceFe
     }
   })
 
-  const formatPrice = (price: number) => {
-    if (price < 1) {
-      return price.toFixed(6)
-    } else if (price < 100) {
-      return price.toFixed(4)
+  const formatPrice = (price: any) => {
+    const numPrice = safeToNumber(price);
+    if (numPrice < 1) {
+      return safeToFixed(numPrice, 6);
+    } else if (numPrice < 100) {
+      return safeToFixed(numPrice, 4);
     } else {
-      return price.toFixed(2)
+      return safeToFixed(numPrice, 2);
     }
-  }
+  };
 
-  const formatChange = (change: number) => {
-    const sign = change >= 0 ? '+' : ''
-    return `${sign}${change.toFixed(2)}%`
-  }
+  const formatChange = (change: any) => {
+    const numChange = safeToNumber(change);
+    const sign = numChange >= 0 ? '+' : '';
+    return `${sign}${safeToFixed(numChange, 2)}%`;
+  };
 
   return (
     <div className="dexter-card">
@@ -108,7 +122,13 @@ export default function LivePriceFeed({ priceUpdates, isConnected }: LivePriceFe
                   <div className="flex justify-between text-xs">
                     <span className="text-gray-400">Spread:</span>
                     <span className="text-yellow-400 font-mono">
-                      {((Math.max(...exchanges.map(e => e.price)) - Math.min(...exchanges.map(e => e.price))) / Math.min(...exchanges.map(e => e.price)) * 100).toFixed(3)}%
+                      {(() => {
+                        const prices = exchanges.map(e => safeToNumber(e.price));
+                        const maxPrice = Math.max(...prices);
+                        const minPrice = Math.min(...prices);
+                        const spreadPercent = minPrice > 0 ? ((maxPrice - minPrice) / minPrice * 100) : 0;
+                        return safeToFixed(spreadPercent, 3);
+                      })()}%
                     </span>
                   </div>
                 </div>

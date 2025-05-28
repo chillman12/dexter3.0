@@ -10,6 +10,12 @@ import ConnectionStatus from './components/ConnectionStatus'
 import PlatformStats from './components/PlatformStats'
 
 export default function DashboardPage() {
+  // Helper function to safely convert to number and apply toFixed
+  const safeToFixed = (value: any, decimals: number = 2): string => {
+    const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    return isNaN(num) ? '0.00' : num.toFixed(decimals);
+  };
+
   const {
     isConnected,
     connectionStatus,
@@ -91,8 +97,7 @@ export default function DashboardPage() {
           <div className="col-span-12 lg:col-span-5 space-y-6">
             {/* Market Depth Chart */}
             <MarketDepthChart 
-              depthUpdates={marketDepthUpdates}
-              isConnected={isConnected}
+              pair="SOL/USDC"
             />
             
             {/* Flash Loan Simulator */}
@@ -183,7 +188,7 @@ export default function DashboardPage() {
                   </span>
                   <span className="text-white">
                     {'profit_percentage' in item 
-                      ? `🎯 Arbitrage: ${item.profit_percentage.toFixed(2)}% on ${item.pair}`
+                      ? `🎯 Arbitrage: ${safeToFixed(item.profit_percentage)}% on ${item.pair}`
                       : `🛡️ MEV Alert: ${item.threat_type} - ${item.risk_level} risk`
                     }
                   </span>

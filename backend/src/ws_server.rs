@@ -10,6 +10,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn, error, debug};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketMessage {
@@ -364,9 +365,9 @@ impl WebSocketServer {
         
         for pair in pairs {
             let base_price = match pair {
-                "SOL/USDC" => 103.45,
-                "ETH/USDC" => 2245.30,
-                "BTC/USDC" => 42150.00,
+                "SOL/USDC" => 171.12,
+                "ETH/USDC" => 3400.00,
+                "BTC/USDC" => 95000.00,
                 "ORCA/USDC" => 1.85,
                 "RAY/USDC" => 2.45,
                 _ => 100.0,

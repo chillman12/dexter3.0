@@ -39,22 +39,48 @@ export default function PlatformStats() {
     return () => clearInterval(interval)
   }, [])
 
-  const formatVolume = (volume: number) => {
-    if (volume >= 1000000) {
-      return `$${(volume / 1000000).toFixed(1)}M`
-    } else if (volume >= 1000) {
-      return `$${(volume / 1000).toFixed(1)}K`
+  const formatVolume = (volume: number | string | undefined | null) => {
+    // Convert to number and handle invalid values
+    const numVolume = typeof volume === 'number' ? volume : parseFloat(String(volume || 0))
+    
+    // Return fallback if not a valid number
+    if (isNaN(numVolume) || numVolume === null || numVolume === undefined) {
+      return '$0'
     }
-    return `$${volume.toFixed(0)}`
+    
+    if (numVolume >= 1000000) {
+      return `$${(numVolume / 1000000).toFixed(1)}M`
+    } else if (numVolume >= 1000) {
+      return `$${(numVolume / 1000).toFixed(1)}K`
+    }
+    return `$${numVolume.toFixed(0)}`
   }
 
-  const formatProfit = (profit: number) => {
-    if (profit >= 1000000) {
-      return `$${(profit / 1000000).toFixed(2)}M`
-    } else if (profit >= 1000) {
-      return `$${(profit / 1000).toFixed(1)}K`
+  const formatProfit = (profit: number | string | undefined | null) => {
+    // Convert to number and handle invalid values
+    const numProfit = typeof profit === 'number' ? profit : parseFloat(String(profit || 0))
+    
+    // Return fallback if not a valid number
+    if (isNaN(numProfit) || numProfit === null || numProfit === undefined) {
+      return '$0'
     }
-    return `$${profit.toFixed(0)}`
+    
+    if (numProfit >= 1000000) {
+      return `$${(numProfit / 1000000).toFixed(2)}M`
+    } else if (numProfit >= 1000) {
+      return `$${(numProfit / 1000).toFixed(1)}K`
+    }
+    return `$${numProfit.toFixed(0)}`
+  }
+
+  const formatPercentage = (value: number | string | undefined | null) => {
+    const numValue = typeof value === 'number' ? value : parseFloat(String(value || 0))
+    
+    if (isNaN(numValue) || numValue === null || numValue === undefined) {
+      return '0.0'
+    }
+    
+    return numValue.toFixed(1)
   }
 
   if (isLoading) {
@@ -123,7 +149,7 @@ export default function PlatformStats() {
           <div>
             <p className="text-sm text-gray-400 mb-1">Success Rate</p>
             <p className="text-2xl font-bold text-purple-400">
-              {displayStats.success_rate.toFixed(1)}%
+              {formatPercentage(displayStats.success_rate)}%
             </p>
             <p className="text-xs text-gray-400 flex items-center mt-1">
               {displayStats.total_trades_1h} trades/hour

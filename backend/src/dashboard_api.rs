@@ -1,14 +1,18 @@
 // Dashboard API Server - Provides REST endpoints for the DEX dashboard frontend
 // Bridges the Next.js dashboard with the Rust arbitrage engine
 
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use rust_decimal::{Decimal, prelude::{FromStr, ToPrimitive, FromPrimitive}};
 use tokio::sync::{RwLock, Mutex};
-use rust_decimal::Decimal;
-use log::{info, warn, error, debug};
-use warp::{Filter, Reply, http::StatusCode};
+use warp::{Filter, Reply, reply::json};
+use warp::http::StatusCode;
+use anyhow::Result;
+use log::{info, warn};
+use crate::external_apis::ExternalApiClient;
+use chrono;
+use rand;
 
 // Dashboard API Data Structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +98,17 @@ pub struct PlatformStats {
     pub active_strategies: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformStatsResponse {
+    pub total_volume_24h: f64,
+    pub active_pairs: u32,
+    pub total_trades_1h: u32,
+    pub opportunities_found: u32,
+    pub success_rate: f64,
+    pub total_profit: f64,
+    pub active_strategies: u32,
+}
+
 // Request/Response structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlashLoanRequest {
@@ -108,6 +123,45 @@ pub struct WalletConnectRequest {
     pub network: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecuteTradeRequest {
+    pub opportunity_id: String,
+    pub amount: Option<Decimal>,
+    pub max_slippage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeExecutionResponse {
+    pub id: String,
+    pub status: String,
+    pub profit: f64,
+    pub execution_time_ms: u64,
+    pub gas_cost: f64,
+    pub slippage: f64,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioResponse {
+    pub total_value_usd: f64,
+    pub available_balance: f64,
+    pub locked_balance: f64,
+    pub daily_pnl: f64,
+    pub total_pnl: f64,
+    pub win_rate: f64,
+    pub active_trades: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionMetricsResponse {
+    pub total_trades: u64,
+    pub successful_trades: u64,
+    pub win_rate: f64,
+    pub total_profit: f64,
+    pub average_execution_time: f64,
+    pub sharpe_ratio: f64,
+}
+
 // Dashboard API Server
 pub struct DashboardApiServer {
     arbitrage_opportunities: Arc<RwLock<Vec<DashboardArbitrageOpportunity>>>,
@@ -116,11 +170,12 @@ pub struct DashboardApiServer {
     mev_threats: Arc<RwLock<Vec<MevThreat>>>,
     technical_indicators: Arc<RwLock<HashMap<String, Vec<TechnicalIndicator>>>>,
     platform_stats: Arc<Mutex<PlatformStats>>,
+    external_api_client: Arc<ExternalApiClient>,
     port: u16,
 }
 
 impl DashboardApiServer {
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, external_api_client: Arc<ExternalApiClient>) -> Self {
         Self {
             arbitrage_opportunities: Arc::new(RwLock::new(Vec::new())),
             flash_loan_simulations: Arc::new(RwLock::new(HashMap::new())),
@@ -136,6 +191,7 @@ impl DashboardApiServer {
                 total_profit: Decimal::ZERO,
                 active_strategies: 0,
             })),
+            external_api_client,
             port,
         }
     }
@@ -146,7 +202,8 @@ impl DashboardApiServer {
         // Clone references for the routes
         let opportunities = self.arbitrage_opportunities.clone();
         let simulations = self.flash_loan_simulations.clone();
-        let depth = self.market_depth.clone();
+        let depth_market = self.market_depth.clone();
+        let depth_pairs = self.market_depth.clone(); // Additional clone for pairs endpoint
         let threats = self.mev_threats.clone();
         let indicators = self.technical_indicators.clone();
         let stats = self.platform_stats.clone();
@@ -175,13 +232,19 @@ impl DashboardApiServer {
             .and(warp::any().map(move || simulations.clone()))
             .and_then(simulate_flash_loan);
 
-        // GET /api/v1/market-depth/{pair} - Get market depth for pair
+        // GET /api/v1/market-depth/{base}/{quote} - Get market depth for pair
         let market_depth_route = api
-            .and(warp::path("market-depth"))
-            .and(warp::path::param::<String>())
+            .and(warp::path!("market-depth" / String / String))
             .and(warp::get())
-            .and(warp::any().map(move || depth.clone()))
-            .and_then(get_market_depth);
+            .and(warp::any().map(move || depth_market.clone()))
+            .and_then(get_market_depth_by_parts);
+
+        // GET /api/v1/market-depth-pairs - Debug endpoint to list all pairs
+        let market_depth_pairs_route = api
+            .and(warp::path("market-depth"))
+            .and(warp::get())
+            .and(warp::any().map(move || depth_pairs.clone()))
+            .and_then(list_market_depth_pairs);
 
         // GET /api/v1/mev-threats - Get MEV threats
         let mev_threats_route = api
@@ -192,15 +255,14 @@ impl DashboardApiServer {
 
         // GET /api/v1/indicators/{pair} - Get technical indicators
         let indicators_route = api
-            .and(warp::path("indicators"))
-            .and(warp::path::param::<String>())
+            .and(warp::path!("technical-indicators" / String))
             .and(warp::get())
             .and(warp::any().map(move || indicators.clone()))
             .and_then(get_technical_indicators);
 
-        // GET /api/v1/stats - Get platform statistics
+        // GET /api/v1/platform-stats - Platform statistics
         let stats_route = api
-            .and(warp::path("stats"))
+            .and(warp::path("platform-stats"))
             .and(warp::get())
             .and(warp::any().map(move || stats.clone()))
             .and_then(get_platform_stats);
@@ -214,6 +276,7 @@ impl DashboardApiServer {
         let routes = opportunities_route
             .or(simulate_flashloan_route)
             .or(market_depth_route)
+            .or(market_depth_pairs_route)
             .or(mev_threats_route)
             .or(indicators_route)
             .or(stats_route)
@@ -222,6 +285,14 @@ impl DashboardApiServer {
 
         // Start data generation tasks
         tokio::spawn(self.clone().generate_mock_data_loop());
+
+        // Generate initial data immediately
+        let initial_server = self.clone();
+        tokio::spawn(async move {
+            initial_server.update_market_depth().await;
+            initial_server.update_platform_stats().await;
+            initial_server.generate_arbitrage_opportunity().await;
+        });
 
         // Start the server
         warp::serve(routes)
@@ -233,6 +304,7 @@ impl DashboardApiServer {
 
     async fn generate_mock_data_loop(self: Arc<Self>) {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
+        let mut external_api_counter = 0;
         
         loop {
             interval.tick().await;
@@ -240,8 +312,13 @@ impl DashboardApiServer {
             // Generate arbitrage opportunities
             self.generate_arbitrage_opportunity().await;
             
-            // Generate market depth data
-            self.update_market_depth().await;
+            // Update market depth with external API data every 5th iteration (15 seconds)
+            external_api_counter += 1;
+            if external_api_counter >= 5 {
+                external_api_counter = 0;
+                info!("🌐 Dashboard API: Updating market depth with real-time prices...");
+                self.update_market_depth().await;
+            }
             
             // Generate MEV threats occasionally
             if rand::random::<f64>() < 0.3 {
@@ -250,6 +327,9 @@ impl DashboardApiServer {
             
             // Update technical indicators
             self.update_technical_indicators().await;
+            
+            // Update platform stats
+            self.update_platform_stats().await;
         }
     }
 
@@ -289,20 +369,76 @@ impl DashboardApiServer {
         
         // Keep only last 10 opportunities
         if opportunities.len() > 10 {
-            opportunities.drain(0..opportunities.len() - 10);
+            let drain_count = opportunities.len() - 10;
+            opportunities.drain(0..drain_count);
         }
     }
 
     async fn update_market_depth(&self) {
         let pairs = vec!["SOL/USDC", "ETH/USDC", "BTC/USDC"];
         
-        for pair in pairs {
-            let base_price = match pair {
-                "SOL/USDC" => Decimal::from_str("103.45").unwrap(),
-                "ETH/USDC" => Decimal::from_str("2245.30").unwrap(),
-                "BTC/USDC" => Decimal::from_str("42150.00").unwrap(),
-                _ => Decimal::from_str("100.00").unwrap(),
+        info!("🔄 Dashboard API: Starting market depth update with external API integration...");
+        
+        // 🔥 GET REAL-TIME PRICES FROM EXTERNAL APIs WITH TIMEOUT 🔥
+        let real_time_prices = match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10), // 10 second timeout
+            self.external_api_client.get_real_time_prices()
+        ).await {
+            Ok(Ok(prices)) => {
+                info!("✅ Dashboard API: Successfully fetched real-time prices from external APIs");
+                info!("📊 Dashboard API: Received {} price entries", prices.len());
+                for (pair, price) in &prices {
+                    info!("💰 Dashboard API: {} = ${:.2}", pair, price);
+                }
+                prices
+            }
+            Ok(Err(e)) => {
+                warn!("⚠️ Dashboard API: Failed to fetch real-time prices: {}", e);
+                // Fallback to current market prices if APIs fail
+                let mut fallback_prices = HashMap::new();
+                fallback_prices.insert("SOL/USDC".to_string(), 171.12); // Current market price
+                fallback_prices.insert("ETH/USDC".to_string(), 3400.00); // Updated to current market price
+                fallback_prices.insert("BTC/USDC".to_string(), 95000.00); // Updated to current market price
+                fallback_prices
+            }
+            Err(_) => {
+                warn!("⚠️ Dashboard API: External API call timed out after 10 seconds");
+                info!("🔄 Dashboard API: Using fallback prices due to timeout...");
+                // Fallback to current market prices if APIs timeout
+                let mut fallback_prices = HashMap::new();
+                fallback_prices.insert("SOL/USDC".to_string(), 171.12); // Current market price
+                fallback_prices.insert("ETH/USDC".to_string(), 3400.00); // Updated to current market price
+                fallback_prices.insert("BTC/USDC".to_string(), 95000.00); // Updated to current market price
+                fallback_prices
+            }
+        };
+        
+        for pair in &pairs {
+            let base_price = match *pair {
+                "SOL/USDC" => {
+                    // Try to get real-time SOL price, fallback to current market price
+                    real_time_prices.get("SOL/USDC_AVERAGE")
+                        .or_else(|| real_time_prices.get("SOL/USDC"))
+                        .or_else(|| real_time_prices.get("SOL/USDC_RAYDIUM"))
+                        .or_else(|| real_time_prices.get("SOL/USDC_DEXSCREENER"))
+                        .copied()
+                        .unwrap_or(171.12) // Updated to current market price
+                }
+                "ETH/USDC" => real_time_prices.get("ETH/USDC").copied().unwrap_or(3400.00),
+                "BTC/USDC" => real_time_prices.get("BTC/USDC").copied().unwrap_or(95000.00),
+                _ => 100.0, // Default fallback
             };
+            
+            let base_price = Decimal::from_f64(base_price).unwrap_or_else(|| {
+                match *pair {
+                    "SOL/USDC" => Decimal::from_str("171.12").unwrap(),
+                    "ETH/USDC" => Decimal::from_str("3400.00").unwrap(),
+                    "BTC/USDC" => Decimal::from_str("95000.00").unwrap(),
+                    _ => Decimal::from_str("100.0").unwrap(),
+                }
+            });
+            
+            info!("💰 Dashboard API: Updated {} price to ${:.2}", pair, base_price);
 
             let mut bids = Vec::new();
             let mut asks = Vec::new();
@@ -380,7 +516,8 @@ impl DashboardApiServer {
         
         // Keep only last 5 threats
         if threats.len() > 5 {
-            threats.drain(0..threats.len() - 5);
+            let drain_count = threats.len() - 5;
+            threats.drain(0..drain_count);
         }
     }
 
@@ -409,6 +546,24 @@ impl DashboardApiServer {
             technical_indicators.insert(pair.to_string(), indicators);
         }
     }
+
+    async fn update_platform_stats(&self) {
+        let opportunities = self.arbitrage_opportunities.read().await;
+        let opportunities_count = opportunities.len() as u32;
+        
+        // Generate realistic mock stats
+        let base_volume = 12500000.0 + (rand::random::<f64>() - 0.5) * 2000000.0;
+        let base_profit = 75000.0 + (rand::random::<f64>() - 0.5) * 15000.0;
+        
+        let mut stats = self.platform_stats.lock().await;
+        stats.total_volume_24h = Decimal::from_f64(base_volume).unwrap_or_default();
+        stats.active_pairs = 15 + (rand::random::<u32>() % 5);
+        stats.total_trades_1h = 1200 + (rand::random::<u32>() % 200);
+        stats.opportunities_found = opportunities_count;
+        stats.success_rate = 85.0 + (rand::random::<f64>() - 0.5) * 10.0;
+        stats.total_profit = Decimal::from_f64(base_profit).unwrap_or_default();
+        stats.active_strategies = 4;
+    }
 }
 
 impl Clone for DashboardApiServer {
@@ -420,6 +575,7 @@ impl Clone for DashboardApiServer {
             mev_threats: self.mev_threats.clone(),
             technical_indicators: self.technical_indicators.clone(),
             platform_stats: self.platform_stats.clone(),
+            external_api_client: self.external_api_client.clone(),
             port: self.port,
         }
     }
@@ -456,15 +612,31 @@ async fn simulate_flash_loan(
     Ok(warp::reply::json(&simulation))
 }
 
-async fn get_market_depth(
-    pair: String,
+async fn get_market_depth_by_parts(
+    base: String,
+    quote: String,
     depth: Arc<RwLock<HashMap<String, MarketDepthData>>>,
 ) -> Result<impl Reply, warp::Rejection> {
+    let pair = format!("{}/{}", base, quote);
     let depth = depth.read().await;
+    
+    // Debug logging
+    println!("🔍 Requested pair: '{}'", pair);
+    println!("🔍 Available pairs: {:?}", depth.keys().collect::<Vec<_>>());
+    
     match depth.get(&pair) {
         Some(data) => Ok(warp::reply::json(data)),
         None => Ok(warp::reply::json(&serde_json::json!({"error": "Pair not found"}))),
     }
+}
+
+// Debug endpoint to list all pairs
+async fn list_market_depth_pairs(
+    depth: Arc<RwLock<HashMap<String, MarketDepthData>>>,
+) -> Result<impl Reply, warp::Rejection> {
+    let depth = depth.read().await;
+    let pairs: Vec<String> = depth.keys().cloned().collect();
+    Ok(warp::reply::json(&serde_json::json!({"pairs": pairs})))
 }
 
 async fn get_mev_threats(
@@ -489,9 +661,13 @@ async fn get_platform_stats(
     stats: Arc<Mutex<PlatformStats>>,
 ) -> Result<impl Reply, warp::Rejection> {
     let stats = stats.lock().await;
-    Ok(warp::reply::json(&*stats))
+    Ok(warp::reply::json(&PlatformStatsResponse {
+        total_volume_24h: stats.total_volume_24h.to_f64().unwrap(),
+        active_pairs: stats.active_pairs,
+        total_trades_1h: stats.total_trades_1h,
+        opportunities_found: stats.opportunities_found,
+        success_rate: stats.success_rate,
+        total_profit: stats.total_profit.to_f64().unwrap(),
+        active_strategies: stats.active_strategies,
+    }))
 }
-
-use rust_decimal::prelude::{FromStr, ToPrimitive, FromPrimitive};
-use rand;
-use chrono;

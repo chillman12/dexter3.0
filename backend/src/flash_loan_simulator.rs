@@ -256,9 +256,9 @@ impl FlashLoanSimulator {
     async fn initialize_market_data(&self) {
         // Initialize token prices
         let mut prices = self.token_prices.write().await;
-        prices.insert("ETH".to_string(), Decimal::from_str("2245.30").unwrap());
+        prices.insert("ETH".to_string(), Decimal::from_str("3400.00").unwrap());
         prices.insert("USDC".to_string(), Decimal::from_str("1.00").unwrap());
-        prices.insert("SOL".to_string(), Decimal::from_str("103.45").unwrap());
+        prices.insert("SOL".to_string(), Decimal::from_str("171.12").unwrap());
     }
 
     pub async fn simulate_flash_loan(&self, request: FlashLoanSimulationRequest) -> Result<FlashLoanSimulationResult> {

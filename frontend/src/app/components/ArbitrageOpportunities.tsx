@@ -8,12 +8,25 @@ interface ArbitrageOpportunitiesProps {
 }
 
 export default function ArbitrageOpportunities({ opportunities, isConnected }: ArbitrageOpportunitiesProps) {
-  const formatProfit = (profit: number) => {
-    if (profit >= 1000) {
-      return `$${(profit / 1000).toFixed(1)}k`
+  // Helper function to safely convert to number and apply toFixed
+  const safeToFixed = (value: any, decimals: number = 2): string => {
+    const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    return isNaN(num) ? '0.00' : num.toFixed(decimals);
+  };
+
+  // Helper function to safely convert to number for calculations
+  const safeToNumber = (value: any): number => {
+    const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const formatProfit = (profit: any) => {
+    const numProfit = safeToNumber(profit);
+    if (numProfit >= 1000) {
+      return `$${safeToFixed(numProfit / 1000, 1)}k`;
     }
-    return `$${profit.toFixed(0)}`
-  }
+    return `$${safeToFixed(numProfit, 0)}`;
+  };
 
   const getRiskColor = (riskLevel: string) => {
     switch (riskLevel.toLowerCase()) {
@@ -28,7 +41,7 @@ export default function ArbitrageOpportunities({ opportunities, isConnected }: A
     }
   }
 
-  const sortedOpportunities = [...opportunities].sort((a, b) => b.profit_percentage - a.profit_percentage)
+  const sortedOpportunities = [...opportunities].sort((a, b) => safeToNumber(b.profit_percentage) - safeToNumber(a.profit_percentage))
 
   return (
     <div className="dexter-card">
@@ -81,7 +94,7 @@ export default function ArbitrageOpportunities({ opportunities, isConnected }: A
                 <div>
                   <p className="text-xs text-gray-400">Profit %</p>
                   <p className="text-lg font-bold text-green-400">
-                    +{opportunity.profit_percentage.toFixed(2)}%
+                    +{safeToFixed(opportunity.profit_percentage, 2)}%
                   </p>
                 </div>
                 <div>
@@ -122,7 +135,7 @@ export default function ArbitrageOpportunities({ opportunities, isConnected }: A
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <p className="text-sm font-semibold text-green-400">
-                {opportunities.filter(o => o.profit_percentage > 1).length}
+                {opportunities.filter(o => safeToNumber(o.profit_percentage) > 1).length}
               </p>
               <p className="text-xs text-gray-400">High Profit</p>
             </div>
@@ -134,7 +147,7 @@ export default function ArbitrageOpportunities({ opportunities, isConnected }: A
             </div>
             <div>
               <p className="text-sm font-semibold text-blue-400">
-                {Math.max(...opportunities.map(o => o.profit_percentage)).toFixed(2)}%
+                {opportunities.length > 0 ? safeToFixed(Math.max(...opportunities.map(o => safeToNumber(o.profit_percentage))), 2) : '0.00'}%
               </p>
               <p className="text-xs text-gray-400">Best Profit</p>
             </div>
