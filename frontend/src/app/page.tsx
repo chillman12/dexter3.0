@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import LivePriceFeed from './components/LivePriceFeed'
 import ArbitrageOpportunities from './components/ArbitrageOpportunities'
@@ -8,8 +9,14 @@ import FlashLoanSimulator from './components/FlashLoanSimulator'
 import MarketDepthChart from './components/MarketDepthChart'
 import ConnectionStatus from './components/ConnectionStatus'
 import PlatformStats from './components/PlatformStats'
+import WalletConnection from './components/WalletConnection'
+import TradingDashboard from './components/TradingDashboard'
+import CrossChainArbitrage from './components/CrossChainArbitrage'
+import RiskManagement from './components/RiskManagement'
 
 export default function DashboardPage() {
+  const [activeView, setActiveView] = useState('overview')
+  
   // Helper function to safely convert to number and apply toFixed
   const safeToFixed = (value: any, decimals: number = 2): string => {
     const num = typeof value === 'string' ? parseFloat(value) : (value || 0);
@@ -51,6 +58,32 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {/* Navigation Tabs */}
+      <div className="bg-gray-800 border-b border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-1 py-2">
+            {[
+              { id: 'overview', label: '📊 Overview', icon: '📊' },
+              { id: 'trading', label: '💹 Trading', icon: '💹' },
+              { id: 'cross-chain', label: '🌐 Cross-Chain', icon: '🌐' },
+              { id: 'risk', label: '🛡️ Risk Management', icon: '🛡️' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveView(tab.id)}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  activeView === tab.id
+                    ? 'bg-gray-700 text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      </div>
+
       {/* Main Dashboard Grid */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Real-time Status Banner */}
@@ -71,163 +104,190 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Top Row - Platform Stats */}
-        <div className="mb-8">
-          <PlatformStats />
-        </div>
+        {/* View-specific content */}
+        {activeView === 'overview' && (
+          <>
+            {/* Top Row - Platform Stats */}
+            <div className="mb-8">
+              <PlatformStats />
+            </div>
 
-        {/* Main Grid Layout */}
-        <div className="grid grid-cols-12 gap-6">
-          {/* Left Column - Price Feeds & Opportunities */}
-          <div className="col-span-12 lg:col-span-4 space-y-6">
-            {/* Live Price Feed */}
-            <LivePriceFeed 
-              priceUpdates={priceUpdates}
-              isConnected={isConnected}
-            />
-            
-            {/* Arbitrage Opportunities */}
-            <ArbitrageOpportunities 
-              opportunities={opportunityUpdates}
-              isConnected={isConnected}
-            />
-          </div>
+            {/* Main Grid Layout */}
+            <div className="grid grid-cols-12 gap-6">
+              {/* Left Column - Wallet & Price Feeds */}
+              <div className="col-span-12 lg:col-span-4 space-y-6">
+                {/* Wallet Connection */}
+                <WalletConnection />
+                
+                {/* Live Price Feed */}
+                <LivePriceFeed 
+                  priceUpdates={priceUpdates}
+                  isConnected={isConnected}
+                />
+                
+                {/* Arbitrage Opportunities */}
+                <ArbitrageOpportunities 
+                  opportunities={opportunityUpdates}
+                  isConnected={isConnected}
+                />
+              </div>
 
-          {/* Center Column - Charts & Analysis */}
-          <div className="col-span-12 lg:col-span-5 space-y-6">
-            {/* Market Depth Chart */}
-            <MarketDepthChart 
-              pair="SOL/USDC"
-            />
-            
-            {/* Flash Loan Simulator */}
-            <FlashLoanSimulator />
-          </div>
+              {/* Center Column - Charts & Analysis */}
+              <div className="col-span-12 lg:col-span-5 space-y-6">
+                {/* Market Depth Chart */}
+                <MarketDepthChart 
+                  pair="SOL/USDC"
+                />
+                
+                {/* Flash Loan Simulator */}
+                <FlashLoanSimulator />
+              </div>
 
-          {/* Right Column - MEV Protection & Advanced Tools */}
-          <div className="col-span-12 lg:col-span-3 space-y-6">
-            {/* MEV Protection Monitor */}
-            <MevProtectionMonitor 
-              mevAlerts={mevAlerts}
-              isConnected={isConnected}
-            />
-            
-            {/* Real-time Strategy Performance */}
-            <div className="dexter-card">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <span className="w-2 h-2 bg-purple-500 rounded-full mr-2 animate-pulse"></span>
-                Strategy Performance
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                  <span className="text-sm">Arbitrage Detection</span>
-                  <span className="text-green-400 font-mono">
-                    {opportunityUpdates.length} active
-                  </span>
+              {/* Right Column - MEV Protection & Advanced Tools */}
+              <div className="col-span-12 lg:col-span-3 space-y-6">
+                {/* MEV Protection Monitor */}
+                <MevProtectionMonitor 
+                  mevAlerts={mevAlerts}
+                  isConnected={isConnected}
+                />
+                
+                {/* Real-time Strategy Performance */}
+                <div className="dexter-card">
+                  <h3 className="text-lg font-semibold mb-4 flex items-center">
+                    <span className="w-2 h-2 bg-purple-500 rounded-full mr-2 animate-pulse"></span>
+                    Strategy Performance
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                      <span className="text-sm">Arbitrage Detection</span>
+                      <span className="text-green-400 font-mono">
+                        {opportunityUpdates.length} active
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                      <span className="text-sm">MEV Protection</span>
+                      <span className="text-blue-400 font-mono">
+                        {mevAlerts.length} alerts
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                      <span className="text-sm">Flash Loan Sim</span>
+                      <span className="text-purple-400 font-mono">Ready</span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                      <span className="text-sm">Price Feeds</span>
+                      <span className="text-yellow-400 font-mono">
+                        {priceUpdates.length} streams
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                  <span className="text-sm">MEV Protection</span>
-                  <span className="text-blue-400 font-mono">
-                    {mevAlerts.length} alerts
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                  <span className="text-sm">Flash Loan Sim</span>
-                  <span className="text-purple-400 font-mono">Ready</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                  <span className="text-sm">Price Feeds</span>
-                  <span className="text-yellow-400 font-mono">
-                    {priceUpdates.length} streams
-                  </span>
+
+                {/* System Health */}
+                <div className="dexter-card">
+                  <h3 className="text-lg font-semibold mb-4">System Health</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">WebSocket</span>
+                      <span className={`px-2 py-1 rounded text-xs ${
+                        isConnected ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+                      }`}>
+                        {isConnected ? 'Connected' : 'Disconnected'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Data Flow</span>
+                      <span className="text-green-400 text-xs">
+                        {connectionStats.messagesReceived > 0 ? 'Active' : 'Waiting'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Latency</span>
+                      <span className="text-blue-400 text-xs font-mono">~50ms</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Uptime</span>
+                      <span className="text-purple-400 text-xs">99.9%</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* System Health */}
-            <div className="dexter-card">
-              <h3 className="text-lg font-semibold mb-4">System Health</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">WebSocket</span>
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    isConnected ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-                  }`}>
-                    {isConnected ? 'Connected' : 'Disconnected'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Data Flow</span>
-                  <span className="text-green-400 text-xs">
-                    {connectionStats.messagesReceived > 0 ? 'Active' : 'Waiting'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Latency</span>
-                  <span className="text-blue-400 text-xs font-mono">~50ms</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm">Uptime</span>
-                  <span className="text-purple-400 text-xs">99.9%</span>
+            {/* Bottom Section - Extended Analytics */}
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Real-time Log */}
+              <div className="dexter-card">
+                <h3 className="text-lg font-semibold mb-4">Real-time Activity Log</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {[...opportunityUpdates.slice(0, 3), ...mevAlerts.slice(0, 2)].map((item, index) => (
+                    <div key={index} className="flex items-center space-x-3 p-2 bg-gray-700 rounded text-sm">
+                      <span className="text-gray-400 font-mono">
+                        {new Date().toLocaleTimeString()}
+                      </span>
+                      <span className="text-white">
+                        {'profit_percentage' in item 
+                          ? `🎯 Arbitrage: ${safeToFixed(item.profit_percentage)}% on ${item.pair}`
+                          : `🛡️ MEV Alert: ${item.threat_type} - ${item.risk_level} risk`
+                        }
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Bottom Section - Extended Analytics */}
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Real-time Log */}
-          <div className="dexter-card">
-            <h3 className="text-lg font-semibold mb-4">Real-time Activity Log</h3>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {[...opportunityUpdates.slice(0, 3), ...mevAlerts.slice(0, 2)].map((item, index) => (
-                <div key={index} className="flex items-center space-x-3 p-2 bg-gray-700 rounded text-sm">
-                  <span className="text-gray-400 font-mono">
-                    {new Date().toLocaleTimeString()}
-                  </span>
-                  <span className="text-white">
-                    {'profit_percentage' in item 
-                      ? `🎯 Arbitrage: ${safeToFixed(item.profit_percentage)}% on ${item.pair}`
-                      : `🛡️ MEV Alert: ${item.threat_type} - ${item.risk_level} risk`
-                    }
-                  </span>
+              {/* Performance Metrics */}
+              <div className="dexter-card">
+                <h3 className="text-lg font-semibold mb-4">Performance Metrics</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-400">
+                      {opportunityUpdates.filter(o => o.profit_percentage > 1).length}
+                    </div>
+                    <div className="text-sm text-gray-400">High-Profit Opps</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-400">
+                      {mevAlerts.filter(a => a.risk_level === 'High').length}
+                    </div>
+                    <div className="text-sm text-gray-400">High-Risk MEV</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-400">
+                      {priceUpdates.length}
+                    </div>
+                    <div className="text-sm text-gray-400">Price Streams</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-yellow-400">
+                      {isConnected ? '100%' : '0%'}
+                    </div>
+                    <div className="text-sm text-gray-400">System Health</div>
+                  </div>
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
+          </>
+        )}
 
-          {/* Performance Metrics */}
-          <div className="dexter-card">
-            <h3 className="text-lg font-semibold mb-4">Performance Metrics</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">
-                  {opportunityUpdates.filter(o => o.profit_percentage > 1).length}
-                </div>
-                <div className="text-sm text-gray-400">High-Profit Opps</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-400">
-                  {mevAlerts.filter(a => a.risk_level === 'High').length}
-                </div>
-                <div className="text-sm text-gray-400">High-Risk MEV</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-400">
-                  {priceUpdates.length}
-                </div>
-                <div className="text-sm text-gray-400">Price Streams</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-400">
-                  {isConnected ? '100%' : '0%'}
-                </div>
-                <div className="text-sm text-gray-400">System Health</div>
-              </div>
+        {activeView === 'trading' && (
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 lg:col-span-3">
+              <WalletConnection />
+            </div>
+            <div className="col-span-12 lg:col-span-9">
+              <TradingDashboard />
             </div>
           </div>
-        </div>
+        )}
+
+        {activeView === 'cross-chain' && (
+          <CrossChainArbitrage />
+        )}
+
+        {activeView === 'risk' && (
+          <RiskManagement />
+        )}
       </main>
     </div>
   )

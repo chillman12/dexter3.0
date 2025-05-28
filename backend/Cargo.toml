@@ -34,9 +34,26 @@ chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 
 # Additional dependencies for production features
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 dotenv = "0.15"
 num-traits = "0.2"
+
+# Database and caching
+redis = { version = "0.23", features = ["tokio-comp", "connection-manager"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+
+# Machine learning and analytics
+ndarray = "0.15"
+linfa = "0.7"
+polars = { version = "0.35", features = ["lazy"] }
+
+# Cross-chain support
+ethers = "2.0"
+web3 = "0.19"
+
+# Cryptography and security
+ring = "0.17"
+jsonwebtoken = "9.0"
 
 # For later Solana integration (add when ready)
 # solana-client = "1.17"

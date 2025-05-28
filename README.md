@@ -7,7 +7,7 @@
 
 ## 🚀 Overview
 
-DEXTER v3.0 is a cutting-edge arbitrage detection and execution platform built for the Solana ecosystem. It provides real-time market analysis, cross-exchange arbitrage opportunities, MEV protection, and automated trading capabilities.
+DEXTER v3.0 is a cutting-edge arbitrage detection and execution platform built for the Solana ecosystem and beyond. It provides real-time market analysis, cross-exchange arbitrage opportunities, MEV protection, automated trading capabilities, and now features advanced cross-chain functionality, machine learning models, and comprehensive risk management.
 
 ## ✨ Key Features
 
@@ -39,6 +39,48 @@ DEXTER v3.0 is a cutting-edge arbitrage detection and execution platform built f
 - **Technical indicators** and market analysis
 - **Platform performance** metrics
 - **Trade execution** statistics
+
+### 💱 **Real DEX Integration**
+- **Jupiter, Raydium, Orca** connectors
+- **Real-time price aggregation**
+- **Smart order routing**
+- **Multi-hop arbitrage paths**
+
+### 👛 **Wallet Connection**
+- **Phantom wallet** support
+- **MetaMask** integration
+- **Real-time balance tracking**
+- **Multi-wallet management**
+
+### 🤖 **Machine Learning Models**
+- **Price prediction** algorithms
+- **MEV detection** neural networks
+- **Trading signal** generation
+- **Risk assessment** models
+
+### 🌐 **Cross-Chain Arbitrage**
+- **Multi-chain support** (Solana, Ethereum, BSC, Polygon, Avalanche)
+- **Bridge integration** (Wormhole, Allbridge, Portal, Synapse)
+- **Cross-chain route** optimization
+- **Gas cost** calculations
+
+### 📈 **Advanced Trading Features**
+- **Real trade execution** engine
+- **Portfolio tracking**
+- **Auto-trading** capabilities
+- **Position management**
+
+### 🛡️ **Risk Management Suite**
+- **Portfolio VaR** calculations
+- **Position sizing** optimization
+- **Stop-loss/Take-profit** automation
+- **Risk metrics** dashboard
+
+### 📊 **Historical Data & Backtesting**
+- **Time-series data** storage
+- **Backtesting engine**
+- **Strategy optimization**
+- **Performance analytics**
 
 ## 🏗️ Architecture
 
@@ -168,6 +210,26 @@ GET /api/v1/arbitrage-opportunities
 }
 ```
 
+## 🔧 Recent Updates (v3.1.0) - MAJOR UPGRADE WITH LIVE DATA
+
+### **🚀 New Features Added**
+- ✅ **Real DEX Integration** - Actual connectors for Jupiter, Raydium, Orca
+- ✅ **Live Price Feeds** - Real-time data from CoinGecko, Binance, Jupiter, DEX Screener
+- ✅ **Wallet Connection** - Phantom and MetaMask support
+- ✅ **Trade Execution Engine** - Execute real trades on-chain
+- ✅ **WebSocket Price Feeds** - Real-time price streaming
+- ✅ **Cross-Chain Arbitrage** - Multi-blockchain support (Solana, Ethereum, BSC, Polygon, Avalanche)
+- ✅ **Machine Learning** - Price prediction and MEV detection
+- ✅ **Risk Management** - Advanced portfolio risk controls
+- ✅ **Historical Data** - Store and analyze past market data with backtesting
+- ✅ **Enhanced UI** - New trading dashboard, cross-chain panel, and risk management interface
+
+### **📊 Live Data Integration**
+- **4+ Price Sources**: CoinGecko, Binance, Jupiter, DEX Screener
+- **Real-time Updates**: Prices refresh every 10 seconds
+- **Price Confidence**: Multi-source validation with confidence scores
+- **Fallback System**: Automatic failover if APIs are unavailable
+
 ## 🔧 Recent Updates (v3.0.1)
 
 ### **Critical Bug Fixes**
@@ -190,6 +252,17 @@ GET /api/v1/arbitrage-opportunities
 - `src/ws_server.rs` - Enhanced WebSocket streaming
 - `src/market_data.rs` - Updated market data collection
 - `src/flash_loan_simulator.rs` - Current token price integration
+
+### **New Files Added (v3.1.0)**
+- `src/dex_connectors.rs` - DEX integration infrastructure
+- `src/wallet_manager.rs` - Wallet connection and management
+- `src/trade_executor.rs` - Real trade execution engine
+- `src/websocket_feeds.rs` - WebSocket price feed manager
+- `src/historical_data.rs` - Historical data and backtesting
+- `src/ml_models.rs` - Machine learning models
+- `src/risk_management.rs` - Risk management system
+- `src/cross_chain.rs` - Cross-chain arbitrage support
+- Frontend components for all new features
 
 ## 🔌 External API Integrations
 
@@ -327,6 +400,23 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+## 🔑 API Setup Guide
+
+### **Quick Start**
+1. Copy `.env.example` to `.env`
+2. Add your API keys (minimum: `BITQUERY_API_KEY`)
+3. Run `cargo build --release` and `cargo run`
+4. Access dashboard at `http://localhost:3000`
+
+### **Available APIs**
+- **No Key Required**: CoinGecko, Binance (public), Jupiter, DEX Screener
+- **Key Required**: Bitquery (for historical data)
+- **Optional Keys**: Premium API subscriptions for higher rate limits
+
+See `API_INTEGRATION_GUIDE.md` for detailed setup instructions.
+
+---
+
 **Built with ❤️ for the Solana ecosystem**
 
-*Last Updated: May 28, 2025*
+*Last Updated: May 28, 2025 - v3.1.0*

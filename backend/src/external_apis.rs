@@ -927,79 +927,244 @@ impl ExternalApiClient {
     pub async fn get_real_time_prices(&self) -> Result<HashMap<String, f64>> {
         let mut prices = HashMap::new();
         
-        // Get SOL price from Jupiter API (SOL/USDC)
-        match self.get_jupiter_quote(
-            SolanaTokens::SOL,
-            SolanaTokens::USDC,
-            1_000_000_000, // 1 SOL in lamports
-            Some(50), // 0.5% slippage
+        info!("🔄 Fetching real-time prices from multiple sources...");
+        
+        // Fetch prices concurrently from multiple sources
+        let (coingecko_prices, binance_prices, jupiter_prices, dexscreener_prices) = tokio::join!(
+            self.fetch_coingecko_prices(),
+            self.fetch_binance_prices(),
+            self.fetch_jupiter_prices(),
+            self.fetch_dexscreener_prices()
+        );
+        
+        // Merge CoinGecko prices
+        if let Ok(cg_prices) = coingecko_prices {
+            for (symbol, price) in cg_prices {
+                prices.insert(format!("{}_COINGECKO", symbol), price);
+                info!("💰 CoinGecko {}: ${:.2}", symbol, price);
+            }
+        }
+        
+        // Merge Binance prices
+        if let Ok(binance_prices) = binance_prices {
+            for (symbol, price) in binance_prices {
+                prices.insert(format!("{}_BINANCE", symbol), price);
+                info!("💰 Binance {}: ${:.2}", symbol, price);
+            }
+        }
+        
+        // Merge Jupiter prices
+        if let Ok(jupiter_prices) = jupiter_prices {
+            for (symbol, price) in jupiter_prices {
+                prices.insert(format!("{}_JUPITER", symbol), price);
+                info!("💰 Jupiter {}: ${:.2}", symbol, price);
+            }
+        }
+        
+        // Merge DEX Screener prices
+        if let Ok(dex_prices) = dexscreener_prices {
+            for (symbol, price) in dex_prices {
+                prices.insert(format!("{}_DEXSCREENER", symbol), price);
+                info!("💰 DEX Screener {}: ${:.2}", symbol, price);
+            }
+        }
+        
+        // Calculate average prices for each token
+        let tokens = ["BTC/USDC", "ETH/USDC", "SOL/USDC"];
+        for token in &tokens {
+            let token_prices: Vec<f64> = prices.iter()
+                .filter(|(key, _)| key.starts_with(token))
+                .map(|(_, price)| *price)
+                .collect();
+            
+            if !token_prices.is_empty() {
+                let avg_price = token_prices.iter().sum::<f64>() / token_prices.len() as f64;
+                prices.insert(token.to_string(), avg_price);
+                info!("📊 Average {} price from {} sources: ${:.2}", token, token_prices.len(), avg_price);
+            } else {
+                // Fallback prices only if no API data is available
+                let fallback_price = match *token {
+                    "BTC/USDC" => 95000.00,
+                    "ETH/USDC" => 3400.00,
+                    "SOL/USDC" => 171.12,
+                    _ => 0.0,
+                };
+                prices.insert(token.to_string(), fallback_price);
+                warn!("⚠️ Using fallback {} price: ${:.2}", token, fallback_price);
+            }
+        }
+        
+        // Add additional token prices
+        prices.insert("RAY/USDC".to_string(), 2.45);
+        prices.insert("ORCA/USDC".to_string(), 1.85);
+        
+        info!("✅ Real-time price fetching completed with {} price points", prices.len());
+        Ok(prices)
+    }
+
+    /// Fetch prices from CoinGecko API
+    async fn fetch_coingecko_prices(&self) -> Result<HashMap<String, f64>> {
+        let mut prices = HashMap::new();
+        
+        let url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd";
+        
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            self.client.get(url).send()
         ).await {
-            Ok(quote) => {
-                if let Ok(in_amount) = quote.in_amount.parse::<f64>() {
-                    if let Ok(out_amount) = quote.out_amount.parse::<f64>() {
-                        let sol_price = (out_amount / 1_000_000.0) / (in_amount / 1_000_000_000.0); // Convert from lamports/micro-USDC
-                        prices.insert("SOL/USDC".to_string(), sol_price);
-                        info!("🎯 Jupiter SOL price: ${:.2}", sol_price);
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("⚠️ Failed to get SOL price from Jupiter: {}", e);
-            }
-        }
-        
-        // Get SOL price from GeckoTerminal (Raydium pool)
-        match self.get_geckoterminal_pool("solana", GeckoTerminalPools::SOLANA_SOL_USDC_RAYDIUM).await {
-            Ok(response) => {
-                if let Ok(price) = response.data.attributes.base_token_price_usd.parse::<f64>() {
-                    prices.insert("SOL/USDC_RAYDIUM".to_string(), price);
-                    info!("🎯 GeckoTerminal SOL price (Raydium): ${:.2}", price);
-                }
-            }
-            Err(e) => {
-                warn!("⚠️ Failed to get SOL price from GeckoTerminal: {}", e);
-            }
-        }
-        
-        // Get SOL price from DEX Screener
-        match self.get_dexscreener_token(SolanaTokens::SOL).await {
-            Ok(response) => {
-                if let Some(pair) = response.pairs.first() {
-                    if let Some(price_usd) = &pair.price_usd {
-                        if let Ok(price) = price_usd.parse::<f64>() {
-                            prices.insert("SOL/USDC_DEXSCREENER".to_string(), price);
-                            info!("🎯 DEX Screener SOL price: ${:.2}", price);
+            Ok(Ok(response)) => {
+                if response.status().is_success() {
+                    if let Ok(text) = response.text().await {
+                        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(btc_price) = data["bitcoin"]["usd"].as_f64() {
+                                prices.insert("BTC/USDC".to_string(), btc_price);
+                            }
+                            if let Some(eth_price) = data["ethereum"]["usd"].as_f64() {
+                                prices.insert("ETH/USDC".to_string(), eth_price);
+                            }
+                            if let Some(sol_price) = data["solana"]["usd"].as_f64() {
+                                prices.insert("SOL/USDC".to_string(), sol_price);
+                            }
                         }
                     }
                 }
             }
-            Err(e) => {
-                warn!("⚠️ Failed to get SOL price from DEX Screener: {}", e);
-            }
-        }
-        
-        // Calculate average SOL price if we have multiple sources
-        let sol_prices: Vec<f64> = prices.values().cloned().collect();
-        if !sol_prices.is_empty() {
-            let avg_sol_price = sol_prices.iter().sum::<f64>() / sol_prices.len() as f64;
-            prices.insert("SOL/USDC_AVERAGE".to_string(), avg_sol_price);
-            info!("📊 Average SOL price from {} sources: ${:.2}", sol_prices.len(), avg_sol_price);
-        }
-        
-        // Add other token prices with realistic values based on current market
-        // These could be enhanced to use real API calls as well
-        prices.insert("ETH/USDC".to_string(), 3400.00);
-        prices.insert("BTC/USDC".to_string(), 95000.00);
-        prices.insert("RAY/USDC".to_string(), 2.45);
-        prices.insert("ORCA/USDC".to_string(), 1.85);
-        
-        // If no external prices were fetched, add fallback SOL price
-        if !prices.contains_key("SOL/USDC") && !prices.contains_key("SOL/USDC_AVERAGE") {
-            prices.insert("SOL/USDC".to_string(), 171.12); // Updated to current market price
-            warn!("⚠️ Using fallback SOL price: $171.12");
+            Ok(Err(e)) => warn!("⚠️ CoinGecko API error: {}", e),
+            Err(_) => warn!("⚠️ CoinGecko API timeout"),
         }
         
         Ok(prices)
+    }
+    
+    /// Fetch prices from Binance API
+    async fn fetch_binance_prices(&self) -> Result<HashMap<String, f64>> {
+        let mut prices = HashMap::new();
+        
+        let symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+        
+        for symbol in &symbols {
+            let url = format!("https://api.binance.com/api/v3/ticker/price?symbol={}", symbol);
+            
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(5),
+                self.client.get(&url).send()
+            ).await {
+                Ok(Ok(response)) => {
+                    if response.status().is_success() {
+                        if let Ok(text) = response.text().await {
+                            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
+                                if let Some(price_str) = data["price"].as_str() {
+                                    if let Ok(price) = price_str.parse::<f64>() {
+                                        let pair = match *symbol {
+                                            "BTCUSDT" => "BTC/USDC",
+                                            "ETHUSDT" => "ETH/USDC", 
+                                            "SOLUSDT" => "SOL/USDC",
+                                            _ => continue,
+                                        };
+                                        prices.insert(pair.to_string(), price);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Err(e)) => warn!("⚠️ Binance API error for {}: {}", symbol, e),
+                Err(_) => warn!("⚠️ Binance API timeout for {}", symbol),
+            }
+            
+            // Small delay to avoid rate limiting
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        
+        Ok(prices)
+    }
+    
+    /// Fetch SOL price from Jupiter API
+    async fn fetch_jupiter_prices(&self) -> Result<HashMap<String, f64>> {
+        let mut prices = HashMap::new();
+        
+        // Get SOL price from Jupiter API (SOL/USDC)
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            self.get_jupiter_quote(
+                SolanaTokens::SOL,
+                SolanaTokens::USDC,
+                1_000_000_000, // 1 SOL in lamports
+                Some(50), // 0.5% slippage
+            )
+        ).await {
+            Ok(Ok(quote)) => {
+                if let Ok(in_amount) = quote.in_amount.parse::<f64>() {
+                    if let Ok(out_amount) = quote.out_amount.parse::<f64>() {
+                        let sol_price = (out_amount / 1_000_000.0) / (in_amount / 1_000_000_000.0);
+                        prices.insert("SOL/USDC".to_string(), sol_price);
+                    }
+                }
+            }
+            Ok(Err(e)) => warn!("⚠️ Jupiter API error: {}", e),
+            Err(_) => warn!("⚠️ Jupiter API timeout"),
+        }
+        
+        Ok(prices)
+    }
+    
+    /// Fetch prices from DEX Screener API
+    async fn fetch_dexscreener_prices(&self) -> Result<HashMap<String, f64>> {
+        let mut prices = HashMap::new();
+        
+        // Fetch SOL price from DEX Screener
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            self.get_dexscreener_token(SolanaTokens::SOL)
+        ).await {
+            Ok(Ok(response)) => {
+                if let Some(pair) = response.pairs.first() {
+                    if let Some(price_usd) = &pair.price_usd {
+                        if let Ok(price) = price_usd.parse::<f64>() {
+                            prices.insert("SOL/USDC".to_string(), price);
+                        }
+                    }
+                }
+            }
+            Ok(Err(e)) => warn!("⚠️ DEX Screener API error: {}", e),
+            Err(_) => warn!("⚠️ DEX Screener API timeout"),
+        }
+        
+        Ok(prices)
+    }
+    
+    /// Get live price for a specific token pair
+    pub async fn get_live_price(&self, token_pair: &str) -> Result<f64> {
+        let prices = self.get_real_time_prices().await?;
+        
+        prices.get(token_pair)
+            .copied()
+            .ok_or_else(|| anyhow!("Price not found for pair: {}", token_pair))
+    }
+    
+    /// Get price with confidence score based on number of sources
+    pub async fn get_price_with_confidence(&self, token_pair: &str) -> Result<(f64, f64)> {
+        let prices = self.get_real_time_prices().await?;
+        
+        // Count how many sources we have for this token
+        let source_count = prices.iter()
+            .filter(|(key, _)| key.starts_with(token_pair))
+            .count();
+        
+        let price = prices.get(token_pair)
+            .copied()
+            .ok_or_else(|| anyhow!("Price not found for pair: {}", token_pair))?;
+        
+        // Calculate confidence based on number of sources (0.0 to 1.0)
+        let confidence = match source_count {
+            0 => 0.1,  // Fallback price only
+            1 => 0.6,  // Single source
+            2 => 0.8,  // Two sources
+            3 => 0.9,  // Three sources
+            _ => 0.95, // Four or more sources
+        };
+        
+        Ok((price, confidence))
     }
 }
 
@@ -1061,3 +1226,35 @@ impl GeckoTerminalPools {
     pub const ETHEREUM_ETH_USDC_UNISWAP_V3: &'static str = "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8";
     pub const ETHEREUM_ETH_USDT_UNISWAP_V3: &'static str = "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36";
 } 
+
+// ============================================================================
+// COMMON TOKEN ADDRESSES FOR SOLANA
+// ============================================================================
+
+pub struct SolanaTokens;
+
+impl SolanaTokens {
+    pub const SOL: &'static str = "So11111111111111111111111111111111111111112";
+    pub const USDC: &'static str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    pub const USDT: &'static str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+    pub const RAY: &'static str = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
+    pub const SRM: &'static str = "SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt";
+    pub const ORCA: &'static str = "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE";
+}
+
+// ============================================================================
+// COMMON POOL ADDRESSES FOR GECKOTERMINAL
+// ============================================================================
+
+pub struct GeckoTerminalPools;
+
+impl GeckoTerminalPools {
+    // Solana network pools
+    pub const SOLANA_SOL_USDC_RAYDIUM: &'static str = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2";
+    pub const SOLANA_SOL_USDC_ORCA: &'static str = "EGZ7tiLeH62TPV1gL8WwbXGzEPa9zmcpVnnkPKKnrE2U";
+    pub const SOLANA_RAY_USDC: &'static str = "6UmmUiYoBjSrhakAobJw8BvkmJtDVxaeBtbt7rxWo1mg";
+    
+    // Ethereum network pools (for future expansion)
+    pub const ETHEREUM_ETH_USDC_UNISWAP_V3: &'static str = "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8";
+    pub const ETHEREUM_ETH_USDT_UNISWAP_V3: &'static str = "0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36";
+}

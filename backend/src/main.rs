@@ -27,6 +27,16 @@ mod ws_server;
 mod external_apis;
 mod trade_execution;
 
+// New advanced modules
+mod dex_connectors;
+mod wallet_manager;
+mod trade_executor;
+mod websocket_feeds;
+mod historical_data;
+mod ml_models;
+mod risk_management;
+mod cross_chain;
+
 // Import specific items we need
 use dashboard_api::DashboardApiServer;
 use mev_protection::MevProtectionEngine;
@@ -35,6 +45,16 @@ use ws_server::WebSocketServer;
 use mev_protection::MevDetection;
 use external_apis::{ExternalApiClient, ArbitrageOpportunity as ExternalArbitrageOpportunity};
 use trade_execution::{TradeExecutionEngine, TradeExecution, Portfolio, ExecutionMetrics};
+
+// New module imports
+use dex_connectors::{DexAggregator, ArbitragePathfinder};
+use wallet_manager::{WalletManager, WalletSecurity};
+use trade_executor::{TradeExecutor, SmartOrderRouter};
+use websocket_feeds::{WebSocketFeedManager, DexWebSocketClient};
+use historical_data::{HistoricalDataStore, BacktestEngine};
+use ml_models::{PricePredictionModel, MEVDetectionModel, TradingSignalGenerator};
+use risk_management::{RiskManager, RiskProfile, PositionSizer, ExitStrategyManager};
+use cross_chain::{CrossChainAggregator};
 
 // Core Data Structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +168,22 @@ pub struct DexterPlatform {
     trade_execution_engine: Arc<TradeExecutionEngine>,
     ws_server: Arc<RwLock<Option<Arc<WebSocketServer>>>>,
     
+    // New advanced components
+    dex_aggregator: Arc<DexAggregator>,
+    wallet_manager: Arc<WalletManager>,
+    wallet_security: Arc<WalletSecurity>,
+    trade_executor: Arc<TradeExecutor>,
+    ws_feed_manager: Arc<WebSocketFeedManager>,
+    historical_store: Arc<HistoricalDataStore>,
+    backtest_engine: Arc<BacktestEngine>,
+    price_predictor: Arc<PricePredictionModel>,
+    mev_detector: Arc<MEVDetectionModel>,
+    signal_generator: Arc<TradingSignalGenerator>,
+    risk_manager: Arc<RiskManager>,
+    position_sizer: Arc<PositionSizer>,
+    exit_manager: Arc<ExitStrategyManager>,
+    cross_chain: Arc<CrossChainAggregator>,
+    
     // Real-time communication channels
     price_broadcaster: broadcast::Sender<PriceInfo>,
     opportunity_broadcaster: broadcast::Sender<ArbitrageOpportunity>,
@@ -202,6 +238,26 @@ impl DexterPlatform {
             flash_loan_simulator: Arc::new(FlashLoanSimulator::new()),
             trade_execution_engine: Arc::new(TradeExecutionEngine::new()),
             ws_server: Arc::new(RwLock::new(None)),
+            
+            // Initialize new components
+            dex_aggregator: Arc::new(DexAggregator::new()),
+            wallet_manager: Arc::new(WalletManager::new()),
+            wallet_security: Arc::new(WalletSecurity::new()),
+            trade_executor: Arc::new(TradeExecutor::new(
+                Arc::new(DexAggregator::new()),
+                Arc::new(WalletManager::new()),
+            )),
+            ws_feed_manager: Arc::new(WebSocketFeedManager::new()),
+            historical_store: Arc::new(HistoricalDataStore::new()),
+            backtest_engine: Arc::new(BacktestEngine::new(Arc::new(HistoricalDataStore::new()))),
+            price_predictor: Arc::new(PricePredictionModel::new()),
+            mev_detector: Arc::new(MEVDetectionModel::new()),
+            signal_generator: Arc::new(TradingSignalGenerator::new()),
+            risk_manager: Arc::new(RiskManager::new(RiskProfile::default())),
+            position_sizer: Arc::new(PositionSizer::new(Arc::new(RiskManager::new(RiskProfile::default())))),
+            exit_manager: Arc::new(ExitStrategyManager::new(Arc::new(RiskManager::new(RiskProfile::default())))),
+            cross_chain: Arc::new(CrossChainAggregator::new()),
+            
             price_broadcaster: price_tx,
             opportunity_broadcaster: opp_tx,
             config,
