@@ -51,6 +51,7 @@ interface UseWebSocketReturn {
   marketDepthUpdates: any[]
   subscribe: (channels: string[], pairs?: string[]) => void
   unsubscribe: (channels: string[]) => void
+  sendMessage: (message: any) => void
   lastMessage: WebSocketMessage | null
   connectionStats: {
     messagesReceived: number
@@ -217,6 +218,15 @@ export function useWebSocket(url: string = 'ws://localhost:3002'): UseWebSocketR
     }
   }, [])
 
+  const sendMessage = useCallback((message: any) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(message))
+      console.log('📤 Sent message:', message)
+    } else {
+      console.warn('⚠️ WebSocket not connected, cannot send message')
+    }
+  }, [])
+
   // Auto-connect on mount
   useEffect(() => {
     connect()
@@ -242,6 +252,7 @@ export function useWebSocket(url: string = 'ws://localhost:3002'): UseWebSocketR
     marketDepthUpdates,
     subscribe,
     unsubscribe,
+    sendMessage,
     lastMessage,
     connectionStats
   }

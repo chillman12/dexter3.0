@@ -54,11 +54,29 @@ web3 = "0.19"
 # Cryptography and security
 ring = "0.17"
 jsonwebtoken = "9.0"
+hex = "0.4"
 
-# For later Solana integration (add when ready)
-# solana-client = "1.17"
-# solana-sdk = "1.17"
-# anchor-lang = "0.29.0"
+# Solana integration with advanced features
+solana-client = "1.17"
+solana-sdk = "1.17"
+anchor-lang = "0.29.0"
+borsh = "1.2"
+
+# High-performance features
+rayon = "1.8"
+memmap2 = "0.9"
+dashmap = "5.5"
+crossbeam = "0.8"
+parking_lot = "0.12"
+num_cpus = "1.16"
+
+# SIMD and zero-copy optimizations
+bytemuck = "1.14"
+zerocopy = "0.7"
+
+# Additional dependencies for advanced features
+ordered-float = "4.2"
+priority-queue = "1.3"
 
 [dev-dependencies]
 tokio-test = "0.4"

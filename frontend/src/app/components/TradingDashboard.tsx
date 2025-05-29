@@ -42,12 +42,18 @@ export default function TradingDashboard() {
     totalPnL: 1250.75,
   });
   const [isAutoTrading, setIsAutoTrading] = useState(false);
-  const { data, sendMessage } = useWebSocket();
+  const { 
+    isConnected, 
+    lastMessage, 
+    sendMessage, 
+    priceUpdates,
+    opportunityUpdates 
+  } = useWebSocket();
 
   useEffect(() => {
     // Handle incoming WebSocket messages
-    if (data?.type === 'trade_update') {
-      const trade = data.trade as TradeOrder;
+    if (lastMessage?.message_type === 'trade_update') {
+      const trade = lastMessage.data as TradeOrder;
       if (trade.status === 'completed') {
         setActiveOrders(prev => prev.filter(o => o.id !== trade.id));
         setCompletedTrades(prev => [trade, ...prev].slice(0, 50));
@@ -62,10 +68,10 @@ export default function TradingDashboard() {
           return [trade, ...prev];
         });
       }
-    } else if (data?.type === 'portfolio_update') {
-      setPortfolio(data.portfolio);
+    } else if (lastMessage?.message_type === 'portfolio_update') {
+      setPortfolio(lastMessage.data);
     }
-  }, [data]);
+  }, [lastMessage]);
 
   const toggleAutoTrading = () => {
     const newState = !isAutoTrading;

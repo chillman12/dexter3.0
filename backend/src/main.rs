@@ -19,13 +19,14 @@ use rand;
 mod market_data;
 mod arbitrage_engine;
 mod smart_contracts;
-mod liquidty_pool;
+mod liquidity_pool;
 mod dashboard_api;
 mod mev_protection;
 mod flash_loan_simulator;
 mod ws_server;
 mod external_apis;
 mod trade_execution;
+mod universal_price_aggregator;
 
 // New advanced modules
 mod dex_connectors;
@@ -45,6 +46,7 @@ use ws_server::WebSocketServer;
 use mev_protection::MevDetection;
 use external_apis::{ExternalApiClient, ArbitrageOpportunity as ExternalArbitrageOpportunity};
 use trade_execution::{TradeExecutionEngine, TradeExecution, Portfolio, ExecutionMetrics};
+use universal_price_aggregator::{UniversalPriceAggregator, PriceBroadcaster, LiveArbitrageOpportunity};
 
 // New module imports
 use dex_connectors::{DexAggregator, ArbitragePathfinder};
@@ -160,6 +162,8 @@ pub struct DexterPlatform {
     
     // External API integration
     external_api_client: Arc<ExternalApiClient>,
+    universal_price_aggregator: Arc<UniversalPriceAggregator>,
+    price_broadcaster_universal: Arc<PriceBroadcaster>,
     
     // Advanced Features
     dashboard_api: Arc<RwLock<Option<Arc<DashboardApiServer>>>>,
@@ -223,6 +227,9 @@ impl DexterPlatform {
         let (price_tx, _) = broadcast::channel(1000);
         let (opp_tx, _) = broadcast::channel(1000);
         
+        let universal_aggregator = Arc::new(UniversalPriceAggregator::new());
+        let price_broadcaster_universal = Arc::new(PriceBroadcaster::new(universal_aggregator.clone()));
+        
         let platform = Self {
             price_feeds: Arc::new(RwLock::new(HashMap::new())),
             opportunities: Arc::new(RwLock::new(Vec::new())),
@@ -231,6 +238,8 @@ impl DexterPlatform {
             
             // External API integration
             external_api_client: Arc::new(ExternalApiClient::new()),
+            universal_price_aggregator: universal_aggregator,
+            price_broadcaster_universal,
             
             // Advanced Features
             dashboard_api: Arc::new(RwLock::new(None)),
@@ -320,6 +329,28 @@ impl DexterPlatform {
         tokio::spawn(async move {
             if let Err(e) = ws_server.start().await {
                 error!("WebSocket Server error: {}", e);
+            }
+        });
+        
+        // Start Universal Price Aggregator
+        info!("💎 Starting Universal Price Aggregator (DEX + CEX)...");
+        let universal_aggregator = self.universal_price_aggregator.clone();
+        let pairs = vec![
+            "BTC/USDT".to_string(),
+            "ETH/USDT".to_string(),
+            "SOL/USDT".to_string(),
+            "BNB/USDT".to_string(),
+            "XRP/USDT".to_string(),
+            "ADA/USDT".to_string(),
+            "AVAX/USDT".to_string(),
+            "DOT/USDT".to_string(),
+            "MATIC/USDT".to_string(),
+            "LINK/USDT".to_string(),
+        ];
+        
+        tokio::spawn(async move {
+            if let Err(e) = universal_aggregator.start_monitoring(pairs).await {
+                error!("Universal Price Aggregator error: {}", e);
             }
         });
         
