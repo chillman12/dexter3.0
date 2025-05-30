@@ -20,6 +20,7 @@ import ArbitrageExecutor from './components/ArbitrageExecutor'
 import DataSourceStatus from './components/DataSourceStatus'
 import CoinPriceWidget from './components/CoinPriceWidget'
 import ProTradingDashboard from './components/ProTradingDashboard'
+import AlphaStrategies from './components/AlphaStrategies'
 
 export default function DashboardPage() {
   const [activeView, setActiveView] = useState('coins')
@@ -72,6 +73,7 @@ export default function DashboardPage() {
             {[
               { id: 'coins', label: '💰 Coins', icon: '💰' },
               { id: 'overview', label: '📊 Overview', icon: '📊' },
+              { id: 'alpha', label: '🎯 Alpha', icon: '🎯' },
               { id: 'price-ticker', label: '💹 Live Prices', icon: '💹' },
               { id: 'arbitrage', label: '🎯 Arbitrage', icon: '🎯' },
               { id: 'executor', label: '⚡ Execute', icon: '⚡' },
@@ -375,6 +377,10 @@ export default function DashboardPage() {
 
         {activeView === 'risk' && (
           <RiskManagement />
+        )}
+
+        {activeView === 'alpha' && (
+          <AlphaStrategies />
         )}
       </main>
     </div>

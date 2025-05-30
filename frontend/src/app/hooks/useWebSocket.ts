@@ -239,7 +239,7 @@ export function useWebSocket(url: string = 'ws://localhost:3002', useMock: boole
   useEffect(() => {
     if (isConnected) {
       // Subscribe to all data feeds for comprehensive dashboard
-      subscribe(['prices', 'opportunities', 'mev', 'depth'])
+      subscribe(['prices', 'opportunities', 'mev', 'depth', 'alpha'])
     }
   }, [isConnected, subscribe])
 

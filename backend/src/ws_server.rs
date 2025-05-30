@@ -11,6 +11,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn, error, debug};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rand;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketMessage {
@@ -51,9 +52,53 @@ pub struct LiveMevAlert {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlphaStrategyUpdate {
+    pub strategy_type: String, // "jit_liquidity", "stat_arb", "liquidity_snipe", etc.
+    pub opportunity_id: String,
+    pub action: String, // "detected", "executing", "completed", "failed"
+    pub details: AlphaStrategyDetails,
+    pub profit_estimate: f64,
+    pub confidence: f64,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AlphaStrategyDetails {
+    JITLiquidity {
+        pool: String,
+        trade_size: f64,
+        expected_fees: f64,
+    },
+    StatArb {
+        pair1: String,
+        pair2: String,
+        spread: f64,
+        correlation: f64,
+    },
+    LiquiditySnipe {
+        new_pool: String,
+        token: String,
+        initial_liquidity: f64,
+    },
+    MarketMaking {
+        pair: String,
+        bid_spread: f64,
+        ask_spread: f64,
+        inventory_imbalance: f64,
+    },
+    CrossChain {
+        source_chain: String,
+        target_chain: String,
+        bridge_token: String,
+        profit_percentage: f64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionRequest {
     pub action: String, // "subscribe" | "unsubscribe"
-    pub channels: Vec<String>, // ["prices", "opportunities", "mev", "depth"]
+    pub channels: Vec<String>, // ["prices", "opportunities", "mev", "depth", "alpha"]
     pub pairs: Option<Vec<String>>, // Optional filter for specific pairs
 }
 
@@ -70,6 +115,7 @@ pub struct WebSocketServer {
     opportunity_broadcaster: broadcast::Sender<LiveOpportunityUpdate>,
     mev_broadcaster: broadcast::Sender<LiveMevAlert>,
     depth_broadcaster: broadcast::Sender<serde_json::Value>,
+    alpha_broadcaster: broadcast::Sender<AlphaStrategyUpdate>,
     
     // Universal price aggregator broadcaster
     universal_price_aggregator: Option<Arc<crate::universal_price_aggregator::UniversalPriceAggregator>>,
@@ -94,6 +140,7 @@ impl WebSocketServer {
         let (opp_tx, _) = broadcast::channel(1000);
         let (mev_tx, _) = broadcast::channel(1000);
         let (depth_tx, _) = broadcast::channel(1000);
+        let (alpha_tx, _) = broadcast::channel(1000);
 
         Self {
             port,
@@ -104,6 +151,7 @@ impl WebSocketServer {
             opportunity_broadcaster: opp_tx,
             mev_broadcaster: mev_tx,
             depth_broadcaster: depth_tx,
+            alpha_broadcaster: alpha_tx,
             universal_price_aggregator: None,
             price_broadcaster_universal: None,
         }
@@ -112,6 +160,10 @@ impl WebSocketServer {
     pub fn set_universal_price_aggregator(&mut self, aggregator: Arc<crate::universal_price_aggregator::UniversalPriceAggregator>, broadcaster: Arc<crate::universal_price_aggregator::PriceBroadcaster>) {
         self.universal_price_aggregator = Some(aggregator);
         self.price_broadcaster_universal = Some(broadcaster);
+    }
+    
+    pub fn get_alpha_broadcaster(&self) -> broadcast::Sender<AlphaStrategyUpdate> {
+        self.alpha_broadcaster.clone()
     }
 
     pub async fn start(self: Arc<Self>) -> Result<()> {
@@ -168,6 +220,7 @@ impl WebSocketServer {
         let mut opp_rx = self.opportunity_broadcaster.subscribe();
         let mut mev_rx = self.mev_broadcaster.subscribe();
         let mut depth_rx = self.depth_broadcaster.subscribe();
+        let mut alpha_rx = self.alpha_broadcaster.subscribe();
 
         // Handle incoming messages from client
         let client_id_clone = client_id.clone();
@@ -280,6 +333,21 @@ impl WebSocketServer {
                             }
                         }
                     }
+                    Ok(alpha_update) = alpha_rx.recv() => {
+                        if Self::client_subscribed_to(&connections_clone2, &client_id_clone2, "alpha").await {
+                            let msg = WebSocketMessage {
+                                message_type: "alpha_strategy_update".to_string(),
+                                data: serde_json::to_value(&alpha_update).unwrap_or_default(),
+                                timestamp: chrono::Utc::now().timestamp() as u64,
+                            };
+                            
+                            if let Ok(json) = serde_json::to_string(&msg) {
+                                if ws_sender.send(Message::Text(json)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -366,6 +434,11 @@ impl WebSocketServer {
             if rand::random::<f64>() < 0.1 { // 10% chance every second
                 self.generate_mev_alert().await;
             }
+            
+            // Generate alpha strategy updates occasionally
+            if rand::random::<f64>() < 0.15 { // 15% chance every second
+                self.generate_alpha_strategy_update().await;
+            }
 
             // Generate market depth updates
             self.generate_market_depth_update().await;
@@ -446,6 +519,63 @@ impl WebSocketServer {
 
             let _ = self.depth_broadcaster.send(depth_data);
         }
+    }
+    
+    async fn generate_alpha_strategy_update(&self) {
+        let strategies = vec![
+            ("jit_liquidity", "JIT Liquidity"),
+            ("stat_arb", "Statistical Arbitrage"),
+            ("liquidity_snipe", "Liquidity Snipe"),
+            ("market_making", "Market Making"),
+            ("cross_chain", "Cross-Chain Arb"),
+        ];
+        
+        let actions = vec!["detected", "executing", "completed"];
+        let strategy = strategies[rand::random::<usize>() % strategies.len()];
+        let action = actions[rand::random::<usize>() % actions.len()];
+        
+        let details = match strategy.0 {
+            "jit_liquidity" => AlphaStrategyDetails::JITLiquidity {
+                pool: "SOL/USDC-Raydium".to_string(),
+                trade_size: 10000.0 + rand::random::<f64>() * 90000.0,
+                expected_fees: 50.0 + rand::random::<f64>() * 150.0,
+            },
+            "stat_arb" => AlphaStrategyDetails::StatArb {
+                pair1: "SOL".to_string(),
+                pair2: "ETH".to_string(),
+                spread: 0.02 + rand::random::<f64>() * 0.03,
+                correlation: 0.8 + rand::random::<f64>() * 0.15,
+            },
+            "liquidity_snipe" => AlphaStrategyDetails::LiquiditySnipe {
+                new_pool: format!("MEME{}/SOL", rand::random::<u32>() % 1000),
+                token: format!("MEME{}", rand::random::<u32>() % 1000),
+                initial_liquidity: 5000.0 + rand::random::<f64>() * 45000.0,
+            },
+            "market_making" => AlphaStrategyDetails::MarketMaking {
+                pair: "SOL/USDC".to_string(),
+                bid_spread: 0.001 + rand::random::<f64>() * 0.002,
+                ask_spread: 0.001 + rand::random::<f64>() * 0.002,
+                inventory_imbalance: -0.2 + rand::random::<f64>() * 0.4,
+            },
+            _ => AlphaStrategyDetails::CrossChain {
+                source_chain: "Solana".to_string(),
+                target_chain: "Ethereum".to_string(),
+                bridge_token: "USDC".to_string(),
+                profit_percentage: 0.5 + rand::random::<f64>() * 2.5,
+            },
+        };
+        
+        let update = AlphaStrategyUpdate {
+            strategy_type: strategy.0.to_string(),
+            opportunity_id: format!("{}_{}", strategy.0, chrono::Utc::now().timestamp_millis()),
+            action: action.to_string(),
+            details,
+            profit_estimate: 100.0 + rand::random::<f64>() * 900.0,
+            confidence: 0.7 + rand::random::<f64>() * 0.25,
+            timestamp: chrono::Utc::now().timestamp() as u64,
+        };
+        
+        let _ = self.alpha_broadcaster.send(update);
     }
 
     pub async fn get_connection_stats(&self) -> HashMap<String, serde_json::Value> {

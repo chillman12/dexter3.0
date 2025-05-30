@@ -37,12 +37,13 @@ mod historical_data;
 mod ml_models;
 mod risk_management;
 mod cross_chain;
+mod alpha_strategies;
 
 // Import specific items we need
 use dashboard_api::DashboardApiServer;
 use mev_protection::MevProtectionEngine;
 use flash_loan_simulator::{FlashLoanSimulator, FlashLoanSimulationRequest, FlashLoanSimulationResult};
-use ws_server::WebSocketServer;
+use ws_server::{WebSocketServer, AlphaStrategyUpdate};
 use mev_protection::MevDetection;
 use external_apis::{ExternalApiClient, ArbitrageOpportunity as ExternalArbitrageOpportunity};
 use trade_execution::{TradeExecutionEngine, TradeExecution, Portfolio, ExecutionMetrics};
@@ -57,6 +58,11 @@ use historical_data::{HistoricalDataStore, BacktestEngine};
 use ml_models::{PricePredictionModel, MEVDetectionModel, TradingSignalGenerator};
 use risk_management::{RiskManager, RiskProfile, PositionSizer, ExitStrategyManager};
 use cross_chain::{CrossChainAggregator};
+use alpha_strategies::{
+    JITLiquidityProvider, StatisticalArbitrageEngine, CrossChainArbitrageBot,
+    MEVProtectionExtractor, LiquiditySniperBot, AdvancedOrderEngine,
+    MarketMakingBot, SandwichProtector, YieldAggregator, OptionsTrader
+};
 
 // Core Data Structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,9 +194,22 @@ pub struct DexterPlatform {
     exit_manager: Arc<ExitStrategyManager>,
     cross_chain: Arc<CrossChainAggregator>,
     
+    // Alpha extraction strategies
+    jit_liquidity: Arc<JITLiquidityProvider>,
+    stat_arb_engine: Arc<StatisticalArbitrageEngine>,
+    cross_chain_arb: Arc<CrossChainArbitrageBot>,
+    mev_extractor: Arc<MEVProtectionExtractor>,
+    liquidity_sniper: Arc<LiquiditySniperBot>,
+    advanced_orders: Arc<AdvancedOrderEngine>,
+    market_maker: Arc<MarketMakingBot>,
+    sandwich_protector: Arc<SandwichProtector>,
+    yield_aggregator: Arc<YieldAggregator>,
+    options_trader: Arc<OptionsTrader>,
+    
     // Real-time communication channels
     price_broadcaster: broadcast::Sender<PriceInfo>,
     opportunity_broadcaster: broadcast::Sender<ArbitrageOpportunity>,
+    alpha_broadcaster: Option<broadcast::Sender<AlphaStrategyUpdate>>,
     
     // Configuration
     config: PlatformConfig,
@@ -267,8 +286,21 @@ impl DexterPlatform {
             exit_manager: Arc::new(ExitStrategyManager::new(Arc::new(RiskManager::new(RiskProfile::default())))),
             cross_chain: Arc::new(CrossChainAggregator::new()),
             
+            // Initialize alpha extraction strategies
+            jit_liquidity: Arc::new(JITLiquidityProvider::new()),
+            stat_arb_engine: Arc::new(StatisticalArbitrageEngine::new()),
+            cross_chain_arb: Arc::new(CrossChainArbitrageBot::new()),
+            mev_extractor: Arc::new(MEVProtectionExtractor::new()),
+            liquidity_sniper: Arc::new(LiquiditySniperBot::new()),
+            advanced_orders: Arc::new(AdvancedOrderEngine::new()),
+            market_maker: Arc::new(MarketMakingBot::new()),
+            sandwich_protector: Arc::new(SandwichProtector::new()),
+            yield_aggregator: Arc::new(YieldAggregator::new()),
+            options_trader: Arc::new(OptionsTrader::new()),
+            
             price_broadcaster: price_tx,
             opportunity_broadcaster: opp_tx,
+            alpha_broadcaster: None,
             config,
             metrics: Arc::new(Mutex::new(PlatformMetrics::default())),
         };
@@ -332,6 +364,14 @@ impl DexterPlatform {
         );
         
         let ws_server_arc = Arc::new(ws_server);
+        
+        // Get the alpha broadcaster before moving ws_server
+        let alpha_broadcaster = ws_server_arc.get_alpha_broadcaster();
+        
+        // Update self's alpha broadcaster (requires mutable access)
+        let self_mut = unsafe { &mut *(Arc::as_ptr(&self) as *mut Self) };
+        self_mut.alpha_broadcaster = Some(alpha_broadcaster);
+        
         self.ws_server.write().await.replace(ws_server_arc.clone());
         tokio::spawn(async move {
             if let Err(e) = ws_server_arc.start().await {
@@ -358,6 +398,84 @@ impl DexterPlatform {
         tokio::spawn(async move {
             if let Err(e) = universal_aggregator.start_monitoring(pairs).await {
                 error!("Universal Price Aggregator error: {}", e);
+            }
+        });
+        
+        // 🎯 Start Alpha Extraction Strategies
+        info!("🎯 Starting Alpha Extraction Strategies...");
+        
+        // JIT Liquidity Provider
+        info!("💧 Starting JIT Liquidity Provider...");
+        let jit_liquidity = self.jit_liquidity.clone();
+        tokio::spawn(async move {
+            if let Err(e) = jit_liquidity.monitor_and_provide().await {
+                error!("JIT Liquidity Provider error: {}", e);
+            }
+        });
+        
+        // Statistical Arbitrage Engine
+        info!("📊 Starting Statistical Arbitrage Engine...");
+        let stat_arb = self.stat_arb_engine.clone();
+        let alpha_tx = self.alpha_broadcaster.clone();
+        tokio::spawn(async move {
+            loop {
+                let opportunities = stat_arb.find_opportunities().await;
+                if !opportunities.is_empty() {
+                    info!("📊 Found {} statistical arbitrage opportunities", opportunities.len());
+                    
+                    // Send alpha updates for each opportunity
+                    if let Some(ref tx) = alpha_tx {
+                        for opp in &opportunities {
+                            let update = AlphaStrategyUpdate {
+                                strategy_type: "stat_arb".to_string(),
+                                opportunity_id: format!("stat_arb_{}", chrono::Utc::now().timestamp_millis()),
+                                action: "detected".to_string(),
+                                details: ws_server::AlphaStrategyDetails::StatArb {
+                                    pair1: opp.long_asset.clone(),
+                                    pair2: opp.short_asset.clone(),
+                                    spread: opp.entry_spread,
+                                    correlation: opp.confidence,
+                                },
+                                profit_estimate: (opp.target_spread - opp.entry_spread).abs(),
+                                confidence: opp.confidence,
+                                timestamp: chrono::Utc::now().timestamp() as u64,
+                            };
+                            let _ = tx.send(update);
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+        
+        // Liquidity Sniper Bot
+        info!("🎯 Starting Liquidity Sniper Bot...");
+        let liquidity_sniper = self.liquidity_sniper.clone();
+        tokio::spawn(async move {
+            if let Err(e) = liquidity_sniper.monitor_new_listings().await {
+                error!("Liquidity Sniper Bot error: {}", e);
+            }
+        });
+        
+        // Market Making Bot
+        info!("📈 Starting Market Making Bot...");
+        let market_maker = self.market_maker.clone();
+        tokio::spawn(async move {
+            loop {
+                // Mock market update cycle
+                debug!("Market Making Bot: Updating quotes...");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+        
+        // Options Trader
+        info!("📊 Starting Options Trader...");
+        let options_trader = self.options_trader.clone();
+        tokio::spawn(async move {
+            loop {
+                // Mock options analysis
+                debug!("Options Trader: Scanning for mispriced options...");
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
         
