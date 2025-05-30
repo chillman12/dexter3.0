@@ -319,15 +319,22 @@ impl DexterPlatform {
         let price_receiver = self.price_broadcaster.subscribe();
         let opportunity_receiver = self.opportunity_broadcaster.subscribe();
         
-        let ws_server = Arc::new(WebSocketServer::new(
+        let mut ws_server = WebSocketServer::new(
             self.config.websocket_port,
             price_receiver,
             opportunity_receiver,
-        ));
+        );
         
-        self.ws_server.write().await.replace(ws_server.clone());
+        // Set up universal price aggregator
+        ws_server.set_universal_price_aggregator(
+            self.universal_price_aggregator.clone(),
+            self.price_broadcaster_universal.clone(),
+        );
+        
+        let ws_server_arc = Arc::new(ws_server);
+        self.ws_server.write().await.replace(ws_server_arc.clone());
         tokio::spawn(async move {
-            if let Err(e) = ws_server.start().await {
+            if let Err(e) = ws_server_arc.start().await {
                 error!("WebSocket Server error: {}", e);
             }
         });

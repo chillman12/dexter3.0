@@ -17,25 +17,31 @@ export default function PlatformStats() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const response = await fetch('http://localhost:3001/api/v1/stats')
-        if (response.ok) {
-          const data = await response.json()
-          setStats(data)
-        }
-      } catch (error) {
-        console.error('Failed to fetch platform stats:', error)
-      } finally {
-        setIsLoading(false)
-      }
+    // Use mock data for now since the simplified backend doesn't have /api/v1/stats
+    const mockStats: PlatformStatsData = {
+      total_volume_24h: 15742856.32,
+      active_pairs: 15,
+      total_trades_1h: 342,
+      opportunities_found: 28,
+      success_rate: 87.5,
+      total_profit: 42567.89,
+      active_strategies: 4
     }
-
-    // Initial fetch
-    fetchStats()
-
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchStats, 30000)
+    
+    setStats(mockStats)
+    setIsLoading(false)
+    
+    // Simulate updates every 30 seconds
+    const interval = setInterval(() => {
+      setStats(prev => prev ? {
+        ...prev,
+        total_volume_24h: prev.total_volume_24h + (Math.random() * 10000 - 5000),
+        total_trades_1h: prev.total_trades_1h + Math.floor(Math.random() * 5),
+        opportunities_found: prev.opportunities_found + Math.floor(Math.random() * 3),
+        total_profit: prev.total_profit + (Math.random() * 1000 - 500)
+      } : mockStats)
+    }, 30000)
+    
     return () => clearInterval(interval)
   }, [])
 

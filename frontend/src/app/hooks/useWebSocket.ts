@@ -42,7 +42,7 @@ export interface SubscriptionRequest {
   pairs?: string[]
 }
 
-interface UseWebSocketReturn {
+export interface UseWebSocketReturn {
   isConnected: boolean
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
   priceUpdates: LivePriceUpdate[]
@@ -60,7 +60,7 @@ interface UseWebSocketReturn {
   }
 }
 
-export function useWebSocket(url: string = 'ws://localhost:3002'): UseWebSocketReturn {
+export function useWebSocket(url: string = 'ws://localhost:3002', useMock: boolean = true): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected')
   const [priceUpdates, setPriceUpdates] = useState<LivePriceUpdate[]>([])
@@ -170,8 +170,8 @@ export function useWebSocket(url: string = 'ws://localhost:3002'): UseWebSocketR
         }
       }
 
-      ws.current.onerror = (error) => {
-        console.error('❌ WebSocket error:', error)
+      ws.current.onerror = (event) => {
+        console.error('❌ WebSocket error occurred')
         setConnectionStatus('error')
         // Don't immediately try to reconnect on error, let onclose handle it
       }

@@ -13,9 +13,16 @@ import WalletConnection from './components/WalletConnection'
 import TradingDashboard from './components/TradingDashboard'
 import CrossChainArbitrage from './components/CrossChainArbitrage'
 import RiskManagement from './components/RiskManagement'
+import LiveArbitrageWidget from './components/LiveArbitrageWidget'
+import UniversalPriceDisplay from './components/UniversalPriceDisplay'
+import ExchangePriceTicker from './components/ExchangePriceTicker'
+import ArbitrageExecutor from './components/ArbitrageExecutor'
+import DataSourceStatus from './components/DataSourceStatus'
+import CoinPriceWidget from './components/CoinPriceWidget'
+import ProTradingDashboard from './components/ProTradingDashboard'
 
 export default function DashboardPage() {
-  const [activeView, setActiveView] = useState('overview')
+  const [activeView, setActiveView] = useState('coins')
   
   // Helper function to safely convert to number and apply toFixed
   const safeToFixed = (value: any, decimals: number = 2): string => {
@@ -63,10 +70,16 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-1 py-2">
             {[
+              { id: 'coins', label: '💰 Coins', icon: '💰' },
               { id: 'overview', label: '📊 Overview', icon: '📊' },
-              { id: 'trading', label: '💹 Trading', icon: '💹' },
+              { id: 'price-ticker', label: '💹 Live Prices', icon: '💹' },
+              { id: 'arbitrage', label: '🎯 Arbitrage', icon: '🎯' },
+              { id: 'executor', label: '⚡ Execute', icon: '⚡' },
+              { id: 'trading', label: '📈 Trading', icon: '📈' },
+              { id: 'mev', label: '🛡️ MEV Protection', icon: '🛡️' },
+              { id: 'flash-loans', label: '⚡ Flash Loans', icon: '⚡' },
               { id: 'cross-chain', label: '🌐 Cross-Chain', icon: '🌐' },
-              { id: 'risk', label: '🛡️ Risk Management', icon: '🛡️' },
+              { id: 'risk', label: '📊 Risk', icon: '📊' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -105,11 +118,16 @@ export default function DashboardPage() {
         </div>
 
         {/* View-specific content */}
+        {activeView === 'coins' && (
+          <ProTradingDashboard />
+        )}
+
         {activeView === 'overview' && (
           <>
-            {/* Top Row - Platform Stats */}
-            <div className="mb-8">
+            {/* Top Row - Platform Stats and Data Sources */}
+            <div className="mb-8 space-y-6">
               <PlatformStats />
+              <DataSourceStatus />
             </div>
 
             {/* Main Grid Layout */}
@@ -270,6 +288,21 @@ export default function DashboardPage() {
           </>
         )}
 
+        {activeView === 'price-ticker' && (
+          <ExchangePriceTicker />
+        )}
+
+        {activeView === 'arbitrage' && (
+          <div className="space-y-6">
+            <LiveArbitrageWidget />
+            <UniversalPriceDisplay />
+          </div>
+        )}
+
+        {activeView === 'executor' && (
+          <ArbitrageExecutor />
+        )}
+
         {activeView === 'trading' && (
           <div className="grid grid-cols-12 gap-6">
             <div className="col-span-12 lg:col-span-3">
@@ -277,6 +310,61 @@ export default function DashboardPage() {
             </div>
             <div className="col-span-12 lg:col-span-9">
               <TradingDashboard />
+            </div>
+          </div>
+        )}
+
+        {activeView === 'mev' && (
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 lg:col-span-8">
+              <MevProtectionMonitor 
+                mevAlerts={mevAlerts}
+                isConnected={isConnected}
+              />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <div className="space-y-6">
+                <PlatformStats />
+                <div className="dexter-card">
+                  <h3 className="text-lg font-semibold mb-4">MEV Statistics</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Threats Detected</span>
+                      <span className="text-white font-mono">{mevAlerts.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">High Risk</span>
+                      <span className="text-red-400 font-mono">
+                        {mevAlerts.filter(a => a.risk_level === 'High').length}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Protected Trades</span>
+                      <span className="text-green-400 font-mono">247</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeView === 'flash-loans' && (
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 lg:col-span-8">
+              <FlashLoanSimulator />
+            </div>
+            <div className="col-span-12 lg:col-span-4">
+              <div className="space-y-6">
+                <LivePriceFeed 
+                  priceUpdates={priceUpdates}
+                  isConnected={isConnected}
+                />
+                <ArbitrageOpportunities 
+                  opportunities={opportunityUpdates}
+                  isConnected={isConnected}
+                />
+              </div>
             </div>
           </div>
         )}

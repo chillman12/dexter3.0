@@ -39,22 +39,8 @@ const MarketDepthChart: React.FC<MarketDepthChartProps> = ({ pair = 'SOL/USDC' }
     const fetchMarketDepth = async () => {
       try {
         setLoading(true);
-        // Split the pair into base and quote for the new API format
-        const [base, quote] = pair.split('/');
-        const response = await fetch(`http://localhost:3001/api/v1/market-depth/${base}/${quote}`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch market depth');
-        }
-        const data = await response.json();
-        
-        // Check if API returned an error
-        if (data.error) {
-          console.warn('Market depth API error:', data.error);
-          // Use fallback data
-          setMarketDepth(generateFallbackData(pair));
-        } else {
-          setMarketDepth(data);
-        }
+        // Use mock data since the simplified backend doesn't have market depth endpoint
+        setMarketDepth(generateFallbackData(pair));
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');

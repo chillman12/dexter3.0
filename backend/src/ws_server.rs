@@ -70,6 +70,10 @@ pub struct WebSocketServer {
     opportunity_broadcaster: broadcast::Sender<LiveOpportunityUpdate>,
     mev_broadcaster: broadcast::Sender<LiveMevAlert>,
     depth_broadcaster: broadcast::Sender<serde_json::Value>,
+    
+    // Universal price aggregator broadcaster
+    universal_price_aggregator: Option<Arc<crate::universal_price_aggregator::UniversalPriceAggregator>>,
+    price_broadcaster_universal: Option<Arc<crate::universal_price_aggregator::PriceBroadcaster>>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,7 +104,14 @@ impl WebSocketServer {
             opportunity_broadcaster: opp_tx,
             mev_broadcaster: mev_tx,
             depth_broadcaster: depth_tx,
+            universal_price_aggregator: None,
+            price_broadcaster_universal: None,
         }
+    }
+    
+    pub fn set_universal_price_aggregator(&mut self, aggregator: Arc<crate::universal_price_aggregator::UniversalPriceAggregator>, broadcaster: Arc<crate::universal_price_aggregator::PriceBroadcaster>) {
+        self.universal_price_aggregator = Some(aggregator);
+        self.price_broadcaster_universal = Some(broadcaster);
     }
 
     pub async fn start(self: Arc<Self>) -> Result<()> {
@@ -110,6 +121,7 @@ impl WebSocketServer {
         tokio::spawn(self.clone().price_forwarding_loop());
         tokio::spawn(self.clone().opportunity_forwarding_loop());
         tokio::spawn(self.clone().generate_live_data_loop());
+        tokio::spawn(self.clone().universal_price_broadcasting_loop());
 
         // Start WebSocket server
         let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", self.port)).await?;
@@ -454,6 +466,52 @@ impl WebSocketServer {
                      serde_json::to_value(subscription_counts).unwrap_or_default());
 
         stats
+    }
+    
+    async fn universal_price_broadcasting_loop(self: Arc<Self>) {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2)); // Send every 2 seconds
+        
+        loop {
+            interval.tick().await;
+            
+            // Broadcast universal price data if available
+            if let (Some(broadcaster), Some(aggregator)) = (&self.price_broadcaster_universal, &self.universal_price_aggregator) {
+                // Get price data
+                if let Ok(price_data) = broadcaster.broadcast_prices().await {
+                    let msg = WebSocketMessage {
+                        message_type: "price_update".to_string(),
+                        data: price_data,
+                        timestamp: chrono::Utc::now().timestamp() as u64,
+                    };
+                    
+                    // Send to all connected clients subscribed to prices
+                    let connections = self.active_connections.read().await;
+                    for (client_id, client) in connections.iter() {
+                        if client.subscriptions.contains(&"prices".to_string()) {
+                            // Send via depth broadcaster as it accepts serde_json::Value
+                            let _ = self.depth_broadcaster.send(msg.data.clone());
+                        }
+                    }
+                }
+                
+                // Get arbitrage opportunities
+                if let Ok(opp_data) = broadcaster.broadcast_opportunities().await {
+                    let msg = WebSocketMessage {
+                        message_type: "arbitrage_update".to_string(),
+                        data: opp_data,
+                        timestamp: chrono::Utc::now().timestamp() as u64,
+                    };
+                    
+                    // Send to all connected clients subscribed to opportunities
+                    let connections = self.active_connections.read().await;
+                    for (client_id, client) in connections.iter() {
+                        if client.subscriptions.contains(&"opportunities".to_string()) {
+                            let _ = self.depth_broadcaster.send(msg.data.clone());
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
