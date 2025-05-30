@@ -1,17 +1,29 @@
-# DEXTER v3.3 - Live Multi-Exchange Arbitrage Platform with Wallet Trading
+# DEXTER v3.4 - Advanced Alpha Extraction Platform for Solana DEX/CEX Trading
 
-![DEXTER Logo](https://img.shields.io/badge/DEXTER-v3.3-blue?style=for-the-badge)
+![DEXTER Logo](https://img.shields.io/badge/DEXTER-v3.4-blue?style=for-the-badge)
 ![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white)
 ![Solana](https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white)
 
 ## 🚀 Overview
 
-DEXTER v3.3 is a production-ready arbitrage trading platform that connects to 11+ exchanges WITHOUT API KEYS for live price data. It features multi-wallet integration for actual trade execution, cross-chain arbitrage, and Rust-native performance optimizations delivering 300-500ms price updates across all major exchanges.
+DEXTER v3.4 is a production-ready arbitrage and alpha extraction platform featuring 10 advanced trading strategies for Solana DEX/CEXs. It connects to 11+ exchanges WITHOUT API KEYS for live price data, features multi-wallet integration for actual trade execution, and implements cutting-edge alpha extraction strategies with Rust-native performance delivering 300-500ms price updates.
 
-## 🔥 What's New in v3.3
+## 🔥 What's New in v3.4 - Alpha Extraction Strategies
 
-### **Live Trading Capabilities**
+### **10 Advanced Alpha Extraction Strategies** 🎯
+1. **JIT (Just-In-Time) Liquidity Provider** - Provide liquidity moments before large trades
+2. **Statistical Arbitrage Engine** - Correlation-based pair trading with ML predictions
+3. **Cross-Chain Arbitrage Bot** - Wormhole-integrated multi-chain opportunities
+4. **MEV Protection & Extraction** - Protect trades while extracting MEV when profitable
+5. **Liquidity Sniper Bot** - Detect and trade new token listings immediately
+6. **Advanced Order Types** - Iceberg, TWAP, conditional bundles
+7. **Market Making Bot** - Automated spread management with inventory balancing
+8. **Sandwich Attack Protector** - Detect and prevent sandwich attacks
+9. **Yield Aggregator** - Auto-compound across multiple protocols
+10. **Options & Derivatives Trader** - Volatility surface analysis and Greeks calculations
+
+### **Live Trading Capabilities** (from v3.3)
 - **Multi-Wallet Support**: Connect Phantom, MetaMask, Solflare, Ledger simultaneously
 - **11 Exchange Integration**: Real-time prices from 7 CEXs + 4 DEXs (NO API KEYS NEEDED!)
 - **One-Click Arbitrage**: Execute trades directly from the dashboard
@@ -30,6 +42,14 @@ DEXTER v3.3 is a production-ready arbitrage trading platform that connects to 11
 - **Lock-Free MEV Protection**: DashMap for concurrent monitoring
 
 ## ✨ Key Features
+
+### 🎯 **Alpha Extraction Strategies** (NEW in v3.4)
+- **Real-time Strategy Monitoring**: Live updates via WebSocket for all 10 strategies
+- **Professional UI Dashboard**: Dedicated Alpha tab with strategy performance metrics
+- **One-Click Execution**: Execute high-confidence opportunities instantly
+- **Strategy Performance Tracking**: Total alpha generated, success rates, active positions
+- **Configurable Risk Parameters**: Adjust thresholds for each strategy type
+- **Parallel Strategy Execution**: All strategies run concurrently for maximum alpha
 
 ### ⚡ **High-Performance Architecture**
 - **Zero-Copy Solana Programs**: Native integration with Anchor framework
@@ -112,24 +132,37 @@ DEXTER v3.3 is a production-ready arbitrage trading platform that connects to 11
 
 ## 🏗️ Architecture
 
-### **Backend (Rust) - Enhanced**
+### **Backend (Rust) - Enhanced with Alpha Strategies**
 - **Port**: 3001
 - **Framework**: Tokio async runtime with Rayon parallelism
 - **APIs**: RESTful endpoints with zero-copy WebSocket support
 - **External Integrations**: Jupiter, GeckoTerminal, DEX Screener, Bitquery
 - **Performance**: SIMD operations, lock-free structures, memory-mapped I/O
+- **Alpha Strategies**: 10 concurrent strategies in `alpha_strategies.rs`
+  - Each strategy runs in its own async task
+  - Real-time updates broadcast via WebSocket
+  - Lock-free state management for high throughput
 
-### **Frontend (Next.js)**
+### **Frontend (Next.js) - Enhanced with Alpha Dashboard**
 - **Port**: 3000
 - **Framework**: React 19 with TypeScript
 - **UI**: Modern, responsive design with real-time updates
-- **WebSocket**: Enhanced hook with message queuing
+- **WebSocket**: Enhanced hook with message queuing and alpha channel
+- **Alpha Dashboard**: Professional UI for strategy monitoring
+  - Real-time strategy updates with profit tracking
+  - One-click execution for opportunities
+  - Filterable views by strategy type
+  - Performance metrics and statistics
 
-### **WebSocket Server - Optimized**
+### **WebSocket Server - Enhanced with Alpha Streaming**
 - **Port**: 3002
 - **Features**: Zero-copy message serialization
 - **Connections**: Lock-free multi-client support
 - **Data**: Parallel stream processing
+- **Alpha Channel**: Real-time strategy updates
+  - Strategy opportunity broadcasts
+  - Execution status updates
+  - Performance metrics streaming
 
 ## 🛠️ Installation & Setup
 
@@ -147,8 +180,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ### **Clone Repository**
 ```bash
-git clone https://github.com/maximumskif/dexterupdate.git
-cd dexterupdate/dester
+git clone https://github.com/chillman12/dexter3.0.git
+cd dexter3.0
 ```
 
 ### **Backend Setup**
@@ -184,12 +217,18 @@ cp .env.example .env
 
 ### **2. Start Backend Server**
 ```bash
-cd dester/backend
+cd backend
 cargo run --release
 ```
 **Expected Output:**
 ```
-🚀 DEXTER v3.3 - Live Trading Edition
+🚀 DEXTER v3.4 - Advanced Alpha Extraction Edition
+🎯 Starting Alpha Extraction Strategies...
+💧 Starting JIT Liquidity Provider...
+📊 Starting Statistical Arbitrage Engine...
+🎯 Starting Liquidity Sniper Bot...
+📈 Starting Market Making Bot...
+📊 Starting Options Trader...
 🌐 Starting Dashboard API server on port 3001
 🔌 WebSocket server on port 3002
 💎 Starting Universal Price Aggregator (DEX + CEX)...
@@ -209,12 +248,18 @@ cargo run --release
 
 ### **3. Start Frontend Application**
 ```bash
-cd dester/frontend
+cd frontend
 npm run dev
 ```
 **Access:** http://localhost:3000
 
-### **4. Test Enhanced API Endpoints**
+### **4. Navigate to Alpha Dashboard**
+- Open http://localhost:3000
+- Click on the "🎯 Alpha" tab
+- Watch real-time alpha extraction opportunities
+- Execute high-confidence trades with one click
+
+### **5. Test Enhanced API Endpoints**
 ```bash
 # Market Depth with parallel processing
 curl http://localhost:3001/api/v1/market-depth/SOL/USDC
@@ -266,7 +311,17 @@ DELETE /api/v1/liquidity/remove
 - Parallel rebalancing algorithms
 - Impermanent loss protection
 
-## 🔧 Recent Updates (v3.2) - RUST-NATIVE PERFORMANCE
+## 🔧 Recent Updates
+
+### **v3.4 - ALPHA EXTRACTION STRATEGIES** (NEW)
+- ✅ **10 Advanced Trading Strategies** - JIT, StatArb, MEV, Sniping, and more
+- ✅ **Real-time Strategy Dashboard** - Professional UI with live updates
+- ✅ **Parallel Strategy Execution** - All strategies run concurrently
+- ✅ **WebSocket Alpha Channel** - Dedicated channel for strategy updates
+- ✅ **One-Click Execution** - Execute opportunities from the dashboard
+- ✅ **Performance Tracking** - Total alpha generated, success rates
+
+### **v3.3 - RUST-NATIVE PERFORMANCE**
 
 ### **🚀 Performance Enhancements**
 - ✅ **Zero-Copy Serialization** - Borsh integration for Solana programs
@@ -325,18 +380,22 @@ DELETE /api/v1/liquidity/remove
 - [x] Smart contract integration
 - [x] Advanced liquidity management
 - [x] Enhanced MEV protection
+- [x] Alpha extraction strategies (10 strategies implemented)
 
 ### **Phase 2: Advanced Features** 🚧
+- [x] Statistical arbitrage with ML
+- [x] JIT liquidity provision
+- [x] Advanced order types (Iceberg, TWAP)
 - [ ] GPU acceleration for ML models
 - [ ] Distributed arbitrage detection
 - [ ] Cross-shard Solana support
-- [ ] Advanced order book reconstruction
 
 ### **Phase 3: Scaling** 📋
 - [ ] Kubernetes deployment
 - [ ] Horizontal scaling support
 - [ ] Global arbitrage network
 - [ ] Institutional features
+- [ ] Strategy backtesting framework
 
 ## 🤝 Contributing
 
@@ -371,8 +430,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Contact
 
-- **GitHub**: [@maximumskif](https://github.com/maximumskif)
-- **Project**: [DEXTER Update](https://github.com/maximumskif/dexterupdate)
+- **GitHub**: [@chillman12](https://github.com/chillman12)
+- **Project**: [DEXTER 3.0](https://github.com/chillman12/dexter3.0)
 
 ---
 
@@ -401,7 +460,14 @@ RUST_LOG=info cargo run --release
 
 ---
 
-## 🎯 What Makes DEXTER v3.3 Special
+## 🎯 What Makes DEXTER v3.4 Special
+
+### **Advanced Alpha Extraction**
+- 10 professional-grade trading strategies
+- Real-time opportunity detection and execution
+- Parallel strategy monitoring
+- Professional dashboard with live metrics
+- One-click execution for high-confidence trades
 
 ### **No API Keys = Instant Start**
 - Start finding arbitrage opportunities in 30 seconds
@@ -424,4 +490,4 @@ RUST_LOG=info cargo run --release
 
 **Built with ❤️ and Rust's zero-cost abstractions**
 
-*Last Updated: December 19, 2024 - v3.3 - Live Multi-Exchange Trading Edition*
+*Last Updated: January 29, 2025 - v3.4 - Advanced Alpha Extraction Edition*
